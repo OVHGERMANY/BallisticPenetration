@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Match the existing live SPT plugins. -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>BallisticPenetration</AssemblyName>
+    <RootNamespace>BallisticPenetration</RootNamespace>
+    <Version>1.1.2</Version>
+
+    <!-- Set SPT_ROOT or override with: -p:SptRoot=C:\path\to\SPT-client -->
+    <SptRoot Condition="'$(SptRoot)' == '' and '$(SPT_ROOT)' != ''">$(SPT_ROOT)</SptRoot>
+
+    <!-- Deployment is opt-in: normal Build never executes the Deploy target. -->
+    <DeployRoot Condition="'$(DeployRoot)' == ''">$(SptRoot)</DeployRoot>
+    <DeployDirectory>$(DeployRoot)\BepInEx\plugins\BallisticPenetration</DeployDirectory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(SptRoot)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(SptRoot)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="spt-reflection">
+      <HintPath>$(SptRoot)\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- BepInEx.BaseUnityPlugin exposes UnityEngine.MonoBehaviour in its public base type. -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateSptReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(SptRoot)\BepInEx\core\BepInEx.dll')" Text="BepInEx.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\BepInEx\core\0Harmony.dll')" Text="0Harmony.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\BepInEx\plugins\spt\spt-reflection.dll')" Text="spt-reflection.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll')" Text="Assembly-CSharp.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.dll')" Text="UnityEngine.dll was not found. It is required only to compile against BepInEx.BaseUnityPlugin. Current SptRoot: $(SptRoot)" />
+  </Target>
+
+  <Target Name="Deploy" DependsOnTargets="Build">
+    <MakeDir Directories="$(DeployDirectory)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(DeployDirectory)\$(TargetFileName)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

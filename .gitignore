@@ -1,0 +1,13 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+
+# IDE and user-specific files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test output
+TestResults/
