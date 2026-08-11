@@ -1,12 +1,13 @@
 using System;
 using System.Reflection;
+using EFT;
 using EFT.Ballistics;
 using UnityEngine;
 
 namespace BallisticPenetration.Runtime
 {
     /// <summary>
-    /// Resolves only the SPT 4.1.2 Shot methods this plugin supports.  Keeping
+    /// Resolves only the SPT 4.1.2 game methods this plugin supports. Keeping
     /// signature verification separate from Harmony patch construction means an
     /// incompatible client fails during plugin startup instead of patching an
     /// unintended overload.
@@ -20,6 +21,12 @@ namespace BallisticPenetration.Runtime
             typeof(Vector3)
         };
 
+        private static readonly Type[] ApplyHitParameters =
+        {
+            typeof(DamageInfo),
+            typeof(ShotId)
+        };
+
         internal static MethodInfo ResolveHandleCollision()
         {
             MethodInfo method = typeof(Shot).GetMethod(
@@ -29,7 +36,12 @@ namespace BallisticPenetration.Runtime
                 HandleCollisionParameters,
                 null);
 
-            return RequireExactInstanceVoidMethod(method, "Shot.HandleCollision(float, Vector3, Vector3)", HandleCollisionParameters);
+            return RequireExactInstanceMethod(
+                method,
+                "Shot.HandleCollision(float, Vector3, Vector3)",
+                typeof(Shot),
+                typeof(void),
+                HandleCollisionParameters);
         }
 
         internal static MethodInfo ResolveCreateFragments()
@@ -41,15 +53,59 @@ namespace BallisticPenetration.Runtime
                 Type.EmptyTypes,
                 null);
 
-            return RequireExactInstanceVoidMethod(method, "Shot.CreateFragments()", Type.EmptyTypes);
+            return RequireExactInstanceMethod(
+                method,
+                "Shot.CreateFragments()",
+                typeof(Shot),
+                typeof(void),
+                Type.EmptyTypes);
         }
 
-        private static MethodInfo RequireExactInstanceVoidMethod(MethodInfo method, string displayName, Type[] expectedParameters)
+        internal static MethodInfo ResolveBodyPartColliderApplyHit()
+        {
+            MethodInfo method = typeof(BodyPartCollider).GetMethod(
+                "ApplyHit",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                null,
+                ApplyHitParameters,
+                null);
+
+            return RequireExactInstanceMethod(
+                method,
+                "BodyPartCollider.ApplyHit(DamageInfo, ShotId)",
+                typeof(BodyPartCollider),
+                typeof(PlayerHitInfo),
+                ApplyHitParameters);
+        }
+
+        internal static MethodInfo ResolveArmorPlateColliderApplyHit()
+        {
+            MethodInfo method = typeof(ArmorPlateCollider).GetMethod(
+                "ApplyHit",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                null,
+                ApplyHitParameters,
+                null);
+
+            return RequireExactInstanceMethod(
+                method,
+                "ArmorPlateCollider.ApplyHit(DamageInfo, ShotId)",
+                typeof(ArmorPlateCollider),
+                typeof(PlayerHitInfo),
+                ApplyHitParameters);
+        }
+
+        private static MethodInfo RequireExactInstanceMethod(
+            MethodInfo method,
+            string displayName,
+            Type expectedDeclaringType,
+            Type expectedReturnType,
+            Type[] expectedParameters)
         {
             if (method == null
-                || method.DeclaringType != typeof(Shot)
+                || method.DeclaringType != expectedDeclaringType
                 || method.IsStatic
-                || method.ReturnType != typeof(void))
+                || method.ReturnType != expectedReturnType)
             {
                 throw new MissingMethodException("SPT 4.1.2 target was not found with the required signature: " + displayName);
             }

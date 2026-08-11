@@ -22,10 +22,12 @@ namespace BallisticPenetration
     {
         internal const string PluginGuid = "com.janky.ballisticpenetration";
         internal const string PluginName = "Janky-BallisticPenetration";
-        internal const string PluginVersion = "1.1.2";
+        internal const string PluginVersion = "1.2.0";
 
         private CollisionSnapshotPatch _collisionSnapshotPatch;
         private FragmentFalloffPatch _fragmentFalloffPatch;
+        private BodyPartColliderPostmortemArmorPatch _bodyPartColliderPostmortemArmorPatch;
+        private ArmorPlateColliderPostmortemArmorPatch _armorPlateColliderPostmortemArmorPatch;
 
         internal static PluginConfiguration Configuration { get; private set; }
 
@@ -40,12 +42,20 @@ namespace BallisticPenetration
             {
                 EnsureExactSptCoreVersion();
 
-                // Resolve and verify both signatures before any Harmony mutation.
+                // Resolve and verify every signature before any Harmony mutation.
                 MethodInfo handleCollisionTarget = TargetMethodResolver.ResolveHandleCollision();
                 MethodInfo createFragmentsTarget = TargetMethodResolver.ResolveCreateFragments();
+                MethodInfo bodyPartColliderApplyHitTarget =
+                    TargetMethodResolver.ResolveBodyPartColliderApplyHit();
+                MethodInfo armorPlateColliderApplyHitTarget =
+                    TargetMethodResolver.ResolveArmorPlateColliderApplyHit();
 
                 _collisionSnapshotPatch = new CollisionSnapshotPatch(handleCollisionTarget);
                 _fragmentFalloffPatch = new FragmentFalloffPatch(createFragmentsTarget);
+                _bodyPartColliderPostmortemArmorPatch =
+                    new BodyPartColliderPostmortemArmorPatch(bodyPartColliderApplyHitTarget);
+                _armorPlateColliderPostmortemArmorPatch =
+                    new ArmorPlateColliderPostmortemArmorPatch(armorPlateColliderApplyHitTarget);
 
                 WarnAboutCompetingPatchOwners(
                     handleCollisionTarget,
@@ -55,6 +65,14 @@ namespace BallisticPenetration
                     createFragmentsTarget,
                     "Shot.CreateFragments()",
                     _fragmentFalloffPatch.HarmonyId);
+                WarnAboutCompetingPatchOwners(
+                    bodyPartColliderApplyHitTarget,
+                    "BodyPartCollider.ApplyHit(DamageInfo, ShotId)",
+                    _bodyPartColliderPostmortemArmorPatch.HarmonyId);
+                WarnAboutCompetingPatchOwners(
+                    armorPlateColliderApplyHitTarget,
+                    "ArmorPlateCollider.ApplyHit(DamageInfo, ShotId)",
+                    _armorPlateColliderPostmortemArmorPatch.HarmonyId);
 
                 EnablePatchesTransactionally();
                 Logger.LogInfo(PluginName + " loaded for SPT 4.1.2.");
@@ -112,7 +130,7 @@ namespace BallisticPenetration
                     + SptVersionCompatibility.CorePluginGuid
                     + " has a missing version; required exact version is "
                     + SptVersionCompatibility.SupportedCoreVersionText
-                    + ". Refusing to enable either Harmony patch.";
+                    + ". Refusing to enable any Harmony patch.";
                 Logger.LogError(missingMessage);
                 throw new InvalidOperationException(missingMessage);
             }
@@ -126,7 +144,7 @@ namespace BallisticPenetration
                     + " is version " + actualVersion
                     + "; required exact version is "
                     + SptVersionCompatibility.SupportedCoreVersionText
-                    + ". Refusing to enable either Harmony patch.";
+                    + ". Refusing to enable any Harmony patch.";
                 Logger.LogError(mismatchMessage);
                 throw new InvalidOperationException(mismatchMessage);
             }
@@ -175,11 +193,15 @@ namespace BallisticPenetration
             {
                 _collisionSnapshotPatch.Enable();
                 _fragmentFalloffPatch.Enable();
+                _bodyPartColliderPostmortemArmorPatch.Enable();
+                _armorPlateColliderPostmortemArmorPatch.Enable();
             }
             catch
             {
-                // ModulePatch can fail after assigning a target, so roll back both
+                // ModulePatch can fail after assigning a target, so roll back all
                 // patch owners rather than relying solely on IsActive.
+                DisableForRollback(_armorPlateColliderPostmortemArmorPatch);
+                DisableForRollback(_bodyPartColliderPostmortemArmorPatch);
                 DisableForRollback(_fragmentFalloffPatch);
                 DisableForRollback(_collisionSnapshotPatch);
                 throw;

@@ -18,7 +18,13 @@ namespace BallisticPenetration.Runtime
                 "General",
                 "Enabled",
                 true,
-                "Enable velocity-based damage and penetration falloff for forward hits.");
+                "Enable BallisticPenetration gameplay changes.");
+
+            DamageArmorOnCorpses = config.Bind(
+                "General",
+                "Damage Armor On Corpses",
+                true,
+                "Apply Tarkov's normal armor durability damage when a forward shot hits armor worn by a corpse.");
 
             PenetrationExponent = config.Bind(
                 "Falloff",
@@ -94,6 +100,8 @@ namespace BallisticPenetration.Runtime
         }
 
         internal ConfigEntry<bool> Enabled { get; private set; }
+
+        internal ConfigEntry<bool> DamageArmorOnCorpses { get; private set; }
 
         internal ConfigEntry<float> PenetrationExponent { get; private set; }
 

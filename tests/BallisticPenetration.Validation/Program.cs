@@ -46,6 +46,8 @@ namespace BallisticPenetration.Validation
             IReadOnlyList<BallisticTemplate> templates = null;
             BallisticTemplate snb = null;
             Run("Exact SPT core version gate", ValidateExactSptCoreVersionGate);
+            Run("Postmortem armor hit guards", ValidatePostmortemArmorHitGuards);
+            Run("Postmortem armor traversal", ValidatePostmortemArmorTraversal);
             Run("Parse SPT items.json safely with System.Text.Json", delegate
             {
                 templates = LoadTemplatesWithBallisticStats(itemsPath);
@@ -135,6 +137,144 @@ namespace BallisticPenetration.Validation
                     "unsupported SPT core version rejected: " + unsupportedVersion,
                     !SptVersionCompatibility.IsExactSupportedCoreVersion(unsupportedVersion));
             }
+        }
+
+        private static void ValidatePostmortemArmorHitGuards()
+        {
+            AssertTrue(
+                "valid postmortem armor hit accepted",
+                PostmortemArmorPolicy.ShouldProcessHit(
+                    true,
+                    true,
+                    true,
+                    true,
+                    true,
+                    50f,
+                    30f,
+                    40f));
+            AssertTrue(
+                "finite zero values remain valid",
+                PostmortemArmorPolicy.ShouldProcessHit(
+                    true,
+                    true,
+                    true,
+                    true,
+                    true,
+                    0f,
+                    0f,
+                    0f));
+
+            AssertTrue(
+                "master-disabled hit rejected",
+                !PostmortemArmorPolicy.ShouldProcessHit(
+                    false, true, true, true, true, 50f, 30f, 40f));
+            AssertTrue(
+                "feature-disabled hit rejected",
+                !PostmortemArmorPolicy.ShouldProcessHit(
+                    true, false, true, true, true, 50f, 30f, 40f));
+            AssertTrue(
+                "non-forward hit rejected",
+                !PostmortemArmorPolicy.ShouldProcessHit(
+                    true, true, false, true, true, 50f, 30f, 40f));
+            AssertTrue(
+                "mismatched collider rejected",
+                !PostmortemArmorPolicy.ShouldProcessHit(
+                    true, true, true, false, true, 50f, 30f, 40f));
+            AssertTrue(
+                "living or unknown target rejected",
+                !PostmortemArmorPolicy.ShouldProcessHit(
+                    true, true, true, true, false, 50f, 30f, 40f));
+
+            float[] invalidValues =
+            {
+                float.NaN,
+                float.PositiveInfinity,
+                float.NegativeInfinity,
+                -1f
+            };
+            for (int index = 0; index < invalidValues.Length; index++)
+            {
+                float invalidValue = invalidValues[index];
+                AssertTrue(
+                    "invalid damage rejected at index " + index,
+                    !PostmortemArmorPolicy.ShouldProcessHit(
+                        true, true, true, true, true, invalidValue, 30f, 40f));
+                AssertTrue(
+                    "invalid penetration rejected at index " + index,
+                    !PostmortemArmorPolicy.ShouldProcessHit(
+                        true, true, true, true, true, 50f, invalidValue, 40f));
+                AssertTrue(
+                    "invalid armor damage rejected at index " + index,
+                    !PostmortemArmorPolicy.ShouldProcessHit(
+                        true, true, true, true, true, 50f, 30f, invalidValue));
+            }
+        }
+
+        private static void ValidatePostmortemArmorTraversal()
+        {
+            AssertEqual(
+                "nonmatching armor skipped",
+                PostmortemArmorTraversalStep.Skip,
+                PostmortemArmorPolicy.GetTraversalStep(false, false, false));
+            AssertEqual(
+                "penetrated armor applies and continues",
+                PostmortemArmorTraversalStep.ApplyAndContinue,
+                PostmortemArmorPolicy.GetTraversalStep(true, false, false));
+            AssertEqual(
+                "blocking armor applies and stops",
+                PostmortemArmorTraversalStep.ApplyAndStop,
+                PostmortemArmorPolicy.GetTraversalStep(true, true, false));
+            AssertEqual(
+                "deflecting armor applies and stops",
+                PostmortemArmorTraversalStep.ApplyAndStop,
+                PostmortemArmorPolicy.GetTraversalStep(true, false, true));
+
+            bool[] matches = { true, false, true, true };
+            AssertEqual(
+                "penetrating hit damages every matching layer",
+                3,
+                CountPostmortemArmorApplications(matches, -1));
+            AssertEqual(
+                "blocked hit includes blocker and excludes later armor",
+                2,
+                CountPostmortemArmorApplications(matches, 2));
+            AssertEqual(
+                "deflected hit includes first armor and stops",
+                1,
+                CountPostmortemArmorApplications(matches, 0));
+            AssertEqual(
+                "uncovered hit damages no armor",
+                0,
+                CountPostmortemArmorApplications(
+                    new[] { false, false, false },
+                    -1));
+        }
+
+        private static int CountPostmortemArmorApplications(
+            IReadOnlyList<bool> matches,
+            int stoppingArmorIndex)
+        {
+            int applied = 0;
+            for (int index = 0; index < matches.Count; index++)
+            {
+                PostmortemArmorTraversalStep step =
+                    PostmortemArmorPolicy.GetTraversalStep(
+                        matches[index],
+                        index == stoppingArmorIndex,
+                        false);
+                if (step == PostmortemArmorTraversalStep.Skip)
+                {
+                    continue;
+                }
+
+                applied++;
+                if (step == PostmortemArmorTraversalStep.ApplyAndStop)
+                {
+                    break;
+                }
+            }
+
+            return applied;
         }
 
         private static void ValidateSnbRows(BallisticTemplate snb)

@@ -4,9 +4,9 @@ Standalone SPT 4.1.2 client plugin for uncapped, impact-speed-based terminal bal
 
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
 and requires its version to equal `4.1.2` exactly before resolving targets or enabling
-either Harmony patch. The hard `BepInDependency` remains for load ordering and minimum
-dependency handling, but it does not replace the equality check. A missing version or
-any other version is logged and initialization fails closed.
+any of its four Harmony patches. The hard `BepInDependency` remains for load ordering
+and minimum dependency handling, but it does not replace the equality check. A missing
+version or any other version is logged and initialization fails closed.
 
 ## What it changes
 
@@ -53,10 +53,25 @@ The saved values are removed after use, including when Tarkov throws during a co
 Each new collision starts from the previous corrected values, so falloff remains
 cumulative across multiple surfaces and child shots.
 
+## Postmortem armor durability
+
+EFT stops its normal player-hit path once a wearer is dead, which also prevents worn
+armor from losing durability when the corpse is shot. When `Damage Armor On Corpses`
+is enabled, forward hits against a corpse are sent through EFT's existing
+`ArmorComponent.ApplyDamage` durability path.
+
+The feature uses the armor block, deflection, and penetration decisions already stored
+on the hit. It does not roll those decisions again. A penetrating hit can damage every
+matching armor layer; a blocked or deflected hit damages matching layers through its
+identified armor, then stops before later layers. Only a local copy of the hit data is
+processed, so no body damage, health event, kill event, or skill-progression callback
+is added after death.
+
 ## Scope
 
 The plugin does not modify flight drag, trajectory integration, ricochet angle/RNG,
-armor resistance code, durability code, or visual effects.
+armor resistance formulas, armor durability formulas, or visual effects. Postmortem
+armor wear calls the existing EFT durability method without changing its calculations.
 
 Armor block and penetration outcomes can change because the existing armor calculation
 reads the corrected `PenetrationPower`. That is the intended gameplay effect. The
@@ -73,6 +88,7 @@ After the game starts once, BepInEx creates:
 Available settings:
 
 - `General / Enabled` (default `true`)
+- `General / Damage Armor On Corpses` (default `true`)
 - `Falloff / Penetration Exponent` (default `1.4`, range `0.1` through `4.0`)
 - `Falloff / Damage Exponent` (default `0.4`, range `0.1` through `4.0`)
 - `Diagnostics / Log Adjustments` (default `false`)
@@ -107,8 +123,9 @@ dotnet build .\BallisticPenetration.sln -c Release "-p:SptRoot=$env:SPT_ROOT"
 dotnet run --project .\tests\BallisticPenetration.Validation\BallisticPenetration.Validation.csproj -c Release -- "$env:SPT_ROOT\SPT_Runtime\SPT_Data\database\templates\items.json"
 ```
 
-The validation suite checks the SNB regression rows, weapon-independence at a fixed
-impact speed, uncapped factors above one, zero and invalid-input handling, cumulative
+The validation suite checks postmortem armor guards and layer traversal, the SNB
+regression rows, weapon-independence at a fixed impact speed, uncapped factors above
+one, zero and invalid-input handling, cumulative
 falloff, 5.45x39 US, all current local ballistic item templates, and exact acceptance
 of `com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part
 versions.
