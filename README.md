@@ -115,7 +115,9 @@ converts each physical component into EFT mass, equivalent diameter, velocity, r
 damage, and penetration while preserving an explicitly supplied EFT target/armor transfer
 multiplier. A separate flight reconciler accepts EFT's measured position and velocity at the next
 collision and advances energy-based physical capability without replacing EFT's trajectory
-integrator.
+integrator. Root state construction derives area, equivalent length, orientation, energy, and
+capability from measured shot values. The runtime binding rejects stale state if EFT recycles the
+same pooled `Shot` object for another projectile.
 
 Only synthetic test profiles are present today. No construction or target profile is yet
 mapped to live ammunition, armor, bodies, or world materials, and target density is reserved

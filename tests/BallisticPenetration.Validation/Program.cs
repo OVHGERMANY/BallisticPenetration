@@ -76,6 +76,7 @@ namespace BallisticPenetration.Validation
             Run("Deformation solver deterministic property sweep", ValidatePhysicalDeformationStressSweep);
             Run("Physical fragmentation profile validation", ValidatePhysicalFragmentationProfile);
             Run("Conserved deterministic projectile fragmentation and target spall", ValidatePhysicalFragmentationResponse);
+            Run("Measured root projectiles derive SI geometry and energy", ValidatePhysicalRootProjectileFactory);
             Run("Physical fragments project to independent EFT shot values", ValidatePhysicalEftProjection);
             Run("Physical-to-EFT projection fails open", ValidatePhysicalEftProjectionFallback);
             Run("Physical fragment flight advances from measured EFT motion", ValidatePhysicalFlightState);
@@ -1913,6 +1914,66 @@ namespace BallisticPenetration.Validation
             AssertEqual("no-spall profile emits no target components", 0, noSpallResponse.TargetSpall.Count);
             AssertNear("no-spall profile target mass", 0d, noSpallResponse.TargetSpallMassKilograms);
             AssertNear("no-spall profile target energy", 0d, noSpallResponse.TargetSpallEnergyJoules);
+        }
+
+        private static void ValidatePhysicalRootProjectileFactory()
+        {
+            const double MassKilograms = 0.0102d;
+            const double DiameterMetres = 0.00562d;
+            const double DensityKilogramsPerCubicMetre = 10300d;
+            var input = new PhysicalRootProjectileInput
+            {
+                ProjectileId = "root-projectile",
+                RootShotId = "root-shot",
+                DeterministicSeed = 0xAABBCCDDEEFF0011UL,
+                Construction = PhysicalProjectileConstruction.SteelCoreJacketed,
+                ShapeClass = PhysicalProjectileShapeClass.Spitzer,
+                MassKilograms = MassKilograms,
+                NominalDiameterMetres = DiameterMetres,
+                MaterialDensityKilogramsPerCubicMetre = DensityKilogramsPerCubicMetre,
+                DragCoefficient = 0.31d,
+                PositionMetres = new PhysicalVector3(4d, 1.5d, -2d),
+                VelocityMetresPerSecond = new PhysicalVector3(120d, -10d, 780d)
+            };
+            PhysicalProjectileState? state;
+            PhysicalRootProjectileFailureReason reason;
+            AssertTrue(
+                "valid measured root projectile accepted",
+                PhysicalRootProjectileFactory.TryCreate(input, out state, out reason));
+            AssertEqual(
+                "valid measured root projectile reason",
+                PhysicalRootProjectileFailureReason.None,
+                reason);
+            PhysicalProjectileState value = RequireValue("measured root projectile", state);
+            double expectedArea = Math.PI * DiameterMetres * DiameterMetres * 0.25d;
+            double expectedLength = (MassKilograms / DensityKilogramsPerCubicMetre) / expectedArea;
+            double expectedEnergy = 0.5d
+                * MassKilograms
+                * input.VelocityMetresPerSecond.MagnitudeSquared;
+            AssertNear("root projected area", expectedArea, value.ProjectedAreaSquareMetres);
+            AssertNear("root equivalent cylinder length", expectedLength, value.LengthMetres);
+            AssertNear("root measured energy", expectedEnergy, value.TranslationalKineticEnergyJoules);
+            AssertNear("root damage capability", expectedEnergy, value.DamageCapabilityJoules);
+            AssertNear(
+                "root penetration capability",
+                expectedEnergy / expectedArea,
+                value.PenetrationCapabilityJoulesPerSquareMetre);
+            AssertTrue("root orientation is unit length", value.Orientation.IsUnit);
+            AssertEqual("root starts with empty history", 0, value.CollisionHistory.Count);
+            AssertEqual(
+                "root starts as intact projectile",
+                PhysicalProjectileKind.IntactProjectile,
+                value.Kind);
+
+            input.VelocityMetresPerSecond = PhysicalVector3.Zero;
+            AssertTrue(
+                "stationary root projectile fails open",
+                !PhysicalRootProjectileFactory.TryCreate(input, out state, out reason));
+            AssertTrue("stationary root returns no state", state == null);
+            AssertEqual(
+                "stationary root failure reason",
+                PhysicalRootProjectileFailureReason.VelocityInvalid,
+                reason);
         }
 
         private static void ValidatePhysicalEftProjection()

@@ -52,6 +52,10 @@ Snapshot date: 2026-08-13
 
 ## Individual-flight integration boundary
 
+- Root factory: `PhysicalRootProjectileFactory.TryCreate`
+- It derives frontal area, equivalent cylinder length, orientation, kinetic energy, and physical
+  capabilities from measured mass, diameter, density, position, and velocity without substituting
+  EFT damage or penetration stats for SI geometry
 - Pure projector: `PhysicalEftProjectileProjector.TryProject`
 - A component maps to EFT mass in grams, equivalent diameter in millimetres, speed, direction,
   relative G1 coefficient, damage, and penetration without inheriting whole-projectile mass,
@@ -64,6 +68,9 @@ Snapshot date: 2026-08-13
 - The runtime seam is verified: `Shot.CreateFragments` finishes child construction before
   `BallisticsCalculator.UpdateShots` schedules `Shot.Fragments`, so an outer postfix can validate,
   rewrite, and reinitialize children before their first tick
+- `PhysicalShotBindingStore` is ready for that seam and rejects stale entries when EFT recycles a
+  pooled `Shot`; it matches the complete captured creation identity rather than trusting the object
+  reference alone
 - These layers are not connected to live shots yet; no gameplay behavior changed in this baseline
 
 ## Deformation and material response
@@ -98,7 +105,7 @@ Snapshot date: 2026-08-13
 
 - Checked Release build with latest recommended analyzers and warnings as errors: zero
   warnings, zero errors
-- Validation groups: 30 passed, zero failed, including 4,096 deterministic deformation cases,
+- Validation groups: 31 passed, zero failed, including 4,096 deterministic deformation cases,
   4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
   reconciliation, fail-open rejection, and the complete installed-ammunition sweep
 - Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
