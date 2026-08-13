@@ -91,10 +91,32 @@ mixed parent/root/collision lineage, duplicate component identities, non-finite 
 fragmentation events with no physical projectile fragment. A fixed PCG random stream is
 provided for later deformation and fragmentation calculations.
 
-This foundation is not yet attached to EFT shots and therefore does not change live
-gameplay in version `1.2.0`. The next stage is the deformation and material-response
-solver; runtime integration follows only after its calculations and conservation rules are
-validated.
+The development tree also contains a deterministic deformation and material-response
+solver. It accepts construction-specific projectile properties, target resistance
+properties, measured physical thickness, and actual material path length. For an outcome
+already selected by the host ballistics system, it calculates target-resistance work,
+projectile plastic deformation, fracture work, heat, residual energy and speed, diameter
+expansion, projected area, yaw/tumble state, drag, and remaining damage and penetration
+capability. It never rerolls the host penetration, ricochet, deviation, fragmentation, or
+stop decision.
+
+Every response must close projectile mass and translational energy. A continuing intact or
+deformed component keeps its physical identity and immutable prior collision records. A
+confirmed fragmentation response reserves explicit projectile mass and energy for the next
+fragment-construction stage rather than creating placeholder children or copying whole-round
+geometry into them.
+
+Only synthetic test profiles are present today. No construction or target profile is yet
+mapped to live ammunition, armor, bodies, or world materials, and target density is reserved
+for the later spall calculation. Physical thickness is recorded separately from the supplied
+effective material path; thickness alone does not secretly alter work unless the measured
+path changes.
+
+The physical-state and deformation core is not attached to EFT shots and therefore does not
+change live gameplay in version `1.2.0`. The next stage constructs individually conserved
+projectile fragments and target spall from the reserved budgets. Runtime integration follows
+only after those components have their own geometry, mass, velocity, energy, drag, lineage,
+and fail-open validation.
 
 ## Configuration
 
@@ -143,12 +165,13 @@ dotnet run --project .\tests\BallisticPenetration.Validation\BallisticPenetratio
 ```
 
 The validation suite checks postmortem armor guards and layer traversal; physical state,
-collision history, SI-derived values, fail-open rejection, projectile/spall separation,
-mass and energy conservation, and deterministic random output; the SNB regression rows;
-weapon-independence at a fixed impact speed; uncapped factors above one; zero and
-invalid-input handling; cumulative falloff; 5.45x39 US; all current local ballistic item
-templates; and exact acceptance of `com.SPT.core` version `4.1.2` while rejecting missing,
-lower, higher, or four-part versions.
+collision history, SI-derived values, immutable state-revision lineage, fail-open rejection,
+projectile/spall separation, mass and energy conservation, deterministic random output,
+material-profile validation, deformation and obliquity response, stopped-energy closure, and
+fragment-budget reservation; the SNB regression rows; weapon-independence at a fixed impact
+speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
+5.45x39 US; all current local ballistic item templates; and exact acceptance of
+`com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part versions.
 
 The game-facing project has compile-only references to BepInEx, Harmony, SPT reflection,
 Assembly-CSharp, UnityEngine.CoreModule, and UnityEngine. `UnityEngine.dll` is required

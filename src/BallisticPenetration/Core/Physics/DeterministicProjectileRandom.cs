@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace BallisticPenetration.Core.Physics
@@ -30,7 +32,7 @@ namespace BallisticPenetration.Core.Physics
         {
             ulong oldState = _state;
             _state = unchecked((oldState * 6364136223846793005UL) + _increment);
-            uint xorShifted = (uint)(((oldState >> 18) ^ oldState) >> 27);
+            uint xorShifted = unchecked((uint)(((oldState >> 18) ^ oldState) >> 27));
             int rotation = (int)(oldState >> 59);
             return (xorShifted >> rotation)
                 | (xorShifted << ((-rotation) & 31));

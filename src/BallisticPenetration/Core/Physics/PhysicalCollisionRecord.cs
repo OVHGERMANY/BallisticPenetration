@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using BallisticPenetration.Core;
 
@@ -23,9 +25,9 @@ namespace BallisticPenetration.Core.Physics
 
     public sealed class PhysicalCollisionRecordInput
     {
-        public string CollisionId { get; set; }
+        public string? CollisionId { get; set; }
 
-        public string MaterialId { get; set; }
+        public string? MaterialId { get; set; }
 
         public PhysicalMaterialClass MaterialClass { get; set; }
 
@@ -51,14 +53,17 @@ namespace BallisticPenetration.Core.Physics
         public PhysicalCollisionOutcome Outcome { get; set; }
     }
 
-    public sealed class PhysicalCollisionRecord
+    public sealed class PhysicalCollisionRecord : IEquatable<PhysicalCollisionRecord>
     {
         private const double RelativeEnergyTolerance = 0.000000001d;
 
-        private PhysicalCollisionRecord(PhysicalCollisionRecordInput input)
+        private PhysicalCollisionRecord(
+            PhysicalCollisionRecordInput input,
+            string collisionId,
+            string materialId)
         {
-            CollisionId = input.CollisionId;
-            MaterialId = input.MaterialId;
+            CollisionId = collisionId;
+            MaterialId = materialId;
             MaterialClass = input.MaterialClass;
             Sequence = input.Sequence;
             PositionMetres = input.PositionMetres;
@@ -96,8 +101,8 @@ namespace BallisticPenetration.Core.Physics
         public PhysicalCollisionOutcome Outcome { get; }
 
         public static bool TryCreate(
-            PhysicalCollisionRecordInput input,
-            out PhysicalCollisionRecord record,
+            PhysicalCollisionRecordInput? input,
+            out PhysicalCollisionRecord? record,
             out PhysicalCollisionRecordFailureReason failureReason)
         {
             record = null;
@@ -107,13 +112,15 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(input.CollisionId))
+            string? collisionId = input.CollisionId;
+            if (string.IsNullOrWhiteSpace(collisionId))
             {
                 failureReason = PhysicalCollisionRecordFailureReason.CollisionIdMissing;
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(input.MaterialId))
+            string? materialId = input.MaterialId;
+            if (string.IsNullOrWhiteSpace(materialId))
             {
                 failureReason = PhysicalCollisionRecordFailureReason.MaterialIdMissing;
                 return false;
@@ -190,9 +197,72 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            record = new PhysicalCollisionRecord(input);
+            record = new PhysicalCollisionRecord(input, collisionId, materialId);
             failureReason = PhysicalCollisionRecordFailureReason.None;
             return true;
+        }
+
+        public bool Equals(PhysicalCollisionRecord? other)
+        {
+            return !ReferenceEquals(other, null)
+                && string.Equals(CollisionId, other.CollisionId, StringComparison.Ordinal)
+                && string.Equals(MaterialId, other.MaterialId, StringComparison.Ordinal)
+                && MaterialClass == other.MaterialClass
+                && Sequence == other.Sequence
+                && PositionMetres == other.PositionMetres
+                && IncomingVelocityMetresPerSecond == other.IncomingVelocityMetresPerSecond
+                && OutgoingVelocityMetresPerSecond == other.OutgoingVelocityMetresPerSecond
+                && IncomingTranslationalEnergyJoules.Equals(
+                    other.IncomingTranslationalEnergyJoules)
+                && OutgoingTranslationalEnergyJoules.Equals(
+                    other.OutgoingTranslationalEnergyJoules)
+                && ImpactAngleRadians.Equals(other.ImpactAngleRadians)
+                && EffectivePathLengthMetres.Equals(other.EffectivePathLengthMetres)
+                && Outcome == other.Outcome;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return Equals(obj as PhysicalCollisionRecord);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = StringComparer.Ordinal.GetHashCode(CollisionId);
+                hash = (hash * 397) ^ StringComparer.Ordinal.GetHashCode(MaterialId);
+                hash = (hash * 397) ^ (int)MaterialClass;
+                hash = (hash * 397) ^ Sequence;
+                hash = (hash * 397) ^ PositionMetres.GetHashCode();
+                hash = (hash * 397) ^ IncomingVelocityMetresPerSecond.GetHashCode();
+                hash = (hash * 397) ^ OutgoingVelocityMetresPerSecond.GetHashCode();
+                hash = (hash * 397) ^ IncomingTranslationalEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ OutgoingTranslationalEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ ImpactAngleRadians.GetHashCode();
+                hash = (hash * 397) ^ EffectivePathLengthMetres.GetHashCode();
+                hash = (hash * 397) ^ (int)Outcome;
+                return hash;
+            }
+        }
+
+        public static bool operator ==(
+            PhysicalCollisionRecord? left,
+            PhysicalCollisionRecord? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return true;
+            }
+
+            return !ReferenceEquals(left, null) && left.Equals(right);
+        }
+
+        public static bool operator !=(
+            PhysicalCollisionRecord? left,
+            PhysicalCollisionRecord? right)
+        {
+            return !(left == right);
         }
 
         private static bool IsFiniteNonNegative(double value)

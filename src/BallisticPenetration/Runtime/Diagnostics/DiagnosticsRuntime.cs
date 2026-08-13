@@ -13,7 +13,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
     internal static class DiagnosticsRuntime
     {
         private static readonly object HostGate = new object();
-        private static DiagnosticsOverlayBehaviour _host;
+        private static DiagnosticsOverlayBehaviour? _host;
 
         internal static void TryRecordAdjustment(
             Shot shot,
@@ -23,7 +23,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.EnableInGameDiagnostics.Value)
                 {
                     return;
@@ -43,7 +43,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord record)
+        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord? record)
         {
             return DiagnosticsRecorder.TryGetLatest(out record);
         }
@@ -56,13 +56,13 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.EnableInGameDiagnostics.Value)
                 {
                     return;
                 }
 
-                AdjustmentDiagnosticRecord latest;
+                AdjustmentDiagnosticRecord? latest;
                 if (!DiagnosticsRecorder.TryGetLatest(out latest) || latest == null)
                 {
                     return;
@@ -81,7 +81,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                DiagnosticsOverlayBehaviour host;
+                DiagnosticsOverlayBehaviour? host;
                 lock (HostGate)
                 {
                     host = _host;
@@ -103,11 +103,6 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
         private static void EnsurePresentationHost()
         {
-            if (_host != null)
-            {
-                return;
-            }
-
             lock (HostGate)
             {
                 if (_host != null)
@@ -115,7 +110,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     return;
                 }
 
-                GameObject hostObject = null;
+                GameObject? hostObject = null;
                 try
                 {
                     hostObject = new GameObject("Janky-BallisticPenetration.Diagnostics");

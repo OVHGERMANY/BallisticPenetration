@@ -32,13 +32,15 @@ namespace BallisticPenetration.Runtime.State
         /// Atomically returns and removes the context. CreateFragments can only
         /// consume a collision snapshot once, even if another patch re-enters it.
         /// </summary>
-        internal static bool TryTake(Shot shot, out CollisionContext context)
+        internal static bool TryTake(Shot shot, out CollisionContext? context)
         {
             lock (Gate)
             {
-                if (Contexts.TryGetValue(shot, out context))
+                CollisionContext storedContext;
+                if (Contexts.TryGetValue(shot, out storedContext))
                 {
                     Contexts.Remove(shot);
+                    context = storedContext;
                     return true;
                 }
 

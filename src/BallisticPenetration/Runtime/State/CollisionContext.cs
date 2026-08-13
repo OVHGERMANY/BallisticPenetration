@@ -26,8 +26,8 @@ namespace BallisticPenetration.Runtime.State
             float damage,
             float penetrationPower,
             float templateInitialSpeed,
-            string templateId,
-            string templateName,
+            string? templateId,
+            string? templateName,
             bool hasPreviousFramePosition,
             Vector3 previousFramePosition,
             CollisionAdjustmentResult result = CollisionAdjustmentResult.Unknown)
@@ -50,9 +50,9 @@ namespace BallisticPenetration.Runtime.State
 
         internal float TemplateInitialSpeed { get; private set; }
 
-        internal string TemplateId { get; private set; }
+        internal string? TemplateId { get; private set; }
 
-        internal string TemplateName { get; private set; }
+        internal string? TemplateName { get; private set; }
 
         internal float PatchInputDamage { get; set; }
 

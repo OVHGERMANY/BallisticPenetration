@@ -24,14 +24,15 @@ namespace BallisticPenetration
         internal const string PluginName = "Janky-BallisticPenetration";
         internal const string PluginVersion = "1.2.0";
 
-        private CollisionSnapshotPatch _collisionSnapshotPatch;
-        private FragmentFalloffPatch _fragmentFalloffPatch;
-        private BodyPartColliderPostmortemArmorPatch _bodyPartColliderPostmortemArmorPatch;
-        private ArmorPlateColliderPostmortemArmorPatch _armorPlateColliderPostmortemArmorPatch;
+        private CollisionSnapshotPatch? _collisionSnapshotPatch;
+        private FragmentFalloffPatch? _fragmentFalloffPatch;
+        private BodyPartColliderPostmortemArmorPatch? _bodyPartColliderPostmortemArmorPatch;
+        private ArmorPlateColliderPostmortemArmorPatch? _armorPlateColliderPostmortemArmorPatch;
+        private bool _isShuttingDown;
 
-        internal static PluginConfiguration Configuration { get; private set; }
+        internal static PluginConfiguration? Configuration { get; private set; }
 
-        internal static ManualLogSource Log { get; private set; }
+        internal static ManualLogSource? Log { get; private set; }
 
         private void Awake()
         {
@@ -50,29 +51,35 @@ namespace BallisticPenetration
                 MethodInfo armorPlateColliderApplyHitTarget =
                     TargetMethodResolver.ResolveArmorPlateColliderApplyHit();
 
-                _collisionSnapshotPatch = new CollisionSnapshotPatch(handleCollisionTarget);
-                _fragmentFalloffPatch = new FragmentFalloffPatch(createFragmentsTarget);
-                _bodyPartColliderPostmortemArmorPatch =
+                CollisionSnapshotPatch collisionSnapshotPatch =
+                    new CollisionSnapshotPatch(handleCollisionTarget);
+                FragmentFalloffPatch fragmentFalloffPatch =
+                    new FragmentFalloffPatch(createFragmentsTarget);
+                BodyPartColliderPostmortemArmorPatch bodyPartColliderPostmortemArmorPatch =
                     new BodyPartColliderPostmortemArmorPatch(bodyPartColliderApplyHitTarget);
-                _armorPlateColliderPostmortemArmorPatch =
+                ArmorPlateColliderPostmortemArmorPatch armorPlateColliderPostmortemArmorPatch =
                     new ArmorPlateColliderPostmortemArmorPatch(armorPlateColliderApplyHitTarget);
+                _collisionSnapshotPatch = collisionSnapshotPatch;
+                _fragmentFalloffPatch = fragmentFalloffPatch;
+                _bodyPartColliderPostmortemArmorPatch = bodyPartColliderPostmortemArmorPatch;
+                _armorPlateColliderPostmortemArmorPatch = armorPlateColliderPostmortemArmorPatch;
 
                 WarnAboutCompetingPatchOwners(
                     handleCollisionTarget,
                     "Shot.HandleCollision(float, Vector3, Vector3)",
-                    _collisionSnapshotPatch.HarmonyId);
+                    collisionSnapshotPatch.HarmonyId);
                 WarnAboutCompetingPatchOwners(
                     createFragmentsTarget,
                     "Shot.CreateFragments()",
-                    _fragmentFalloffPatch.HarmonyId);
+                    fragmentFalloffPatch.HarmonyId);
                 WarnAboutCompetingPatchOwners(
                     bodyPartColliderApplyHitTarget,
                     "BodyPartCollider.ApplyHit(DamageInfo, ShotId)",
-                    _bodyPartColliderPostmortemArmorPatch.HarmonyId);
+                    bodyPartColliderPostmortemArmorPatch.HarmonyId);
                 WarnAboutCompetingPatchOwners(
                     armorPlateColliderApplyHitTarget,
                     "ArmorPlateCollider.ApplyHit(DamageInfo, ShotId)",
-                    _armorPlateColliderPostmortemArmorPatch.HarmonyId);
+                    armorPlateColliderPostmortemArmorPatch.HarmonyId);
 
                 EnablePatchesTransactionally();
                 Logger.LogInfo(PluginName + " loaded for SPT 4.1.2.");
@@ -86,12 +93,18 @@ namespace BallisticPenetration
 
         private void OnDestroy()
         {
+            _isShuttingDown = true;
             // Remove the optional overlay and trace objects.
             DiagnosticsRuntime.Shutdown();
         }
 
         private void Update()
         {
+            if (_isShuttingDown)
+            {
+                return;
+            }
+
             // Unity objects are created from this main-thread callback.
             DiagnosticsRuntime.UpdatePresentation();
         }
@@ -100,7 +113,7 @@ namespace BallisticPenetration
         {
             try
             {
-                ManualLogSource logger = Log;
+                ManualLogSource? logger = Log;
                 if (logger != null)
                 {
                     logger.LogWarning(
@@ -156,7 +169,7 @@ namespace BallisticPenetration
         }
 
         internal static void LogAdjustment(
-            string ammoTemplateId,
+            string? ammoTemplateId,
             float impactSpeed,
             float templateSpeed,
             float preCollisionDamage,
@@ -168,7 +181,7 @@ namespace BallisticPenetration
         {
             try
             {
-                ManualLogSource logger = Log;
+                ManualLogSource? logger = Log;
                 if (logger != null)
                 {
                     logger.LogInfo(
@@ -189,26 +202,37 @@ namespace BallisticPenetration
 
         private void EnablePatchesTransactionally()
         {
+            CollisionSnapshotPatch collisionSnapshotPatch = _collisionSnapshotPatch
+                ?? throw new InvalidOperationException("Collision snapshot patch was not created.");
+            FragmentFalloffPatch fragmentFalloffPatch = _fragmentFalloffPatch
+                ?? throw new InvalidOperationException("Fragment falloff patch was not created.");
+            BodyPartColliderPostmortemArmorPatch bodyPartColliderPostmortemArmorPatch =
+                _bodyPartColliderPostmortemArmorPatch
+                ?? throw new InvalidOperationException("Body-part armor patch was not created.");
+            ArmorPlateColliderPostmortemArmorPatch armorPlateColliderPostmortemArmorPatch =
+                _armorPlateColliderPostmortemArmorPatch
+                ?? throw new InvalidOperationException("Armor-plate patch was not created.");
+
             try
             {
-                _collisionSnapshotPatch.Enable();
-                _fragmentFalloffPatch.Enable();
-                _bodyPartColliderPostmortemArmorPatch.Enable();
-                _armorPlateColliderPostmortemArmorPatch.Enable();
+                collisionSnapshotPatch.Enable();
+                fragmentFalloffPatch.Enable();
+                bodyPartColliderPostmortemArmorPatch.Enable();
+                armorPlateColliderPostmortemArmorPatch.Enable();
             }
             catch
             {
                 // ModulePatch can fail after assigning a target, so roll back all
                 // patch owners rather than relying solely on IsActive.
-                DisableForRollback(_armorPlateColliderPostmortemArmorPatch);
-                DisableForRollback(_bodyPartColliderPostmortemArmorPatch);
-                DisableForRollback(_fragmentFalloffPatch);
-                DisableForRollback(_collisionSnapshotPatch);
+                DisableForRollback(armorPlateColliderPostmortemArmorPatch);
+                DisableForRollback(bodyPartColliderPostmortemArmorPatch);
+                DisableForRollback(fragmentFalloffPatch);
+                DisableForRollback(collisionSnapshotPatch);
                 throw;
             }
         }
 
-        private void DisableForRollback(SPT.Reflection.Patching.ModulePatch patch)
+        private static void DisableForRollback(SPT.Reflection.Patching.ModulePatch? patch)
         {
             if (patch == null || patch.TargetMethod == null)
             {
@@ -221,7 +245,7 @@ namespace BallisticPenetration
             }
             catch (Exception cleanupException)
             {
-                Logger.LogError("Failed while rolling back " + patch.GetType().Name + ": " + cleanupException);
+                Log?.LogError("Failed while rolling back " + patch.GetType().Name + ": " + cleanupException);
             }
         }
 

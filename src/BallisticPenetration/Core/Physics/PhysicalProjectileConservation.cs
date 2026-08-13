@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using BallisticPenetration.Core;
@@ -15,7 +17,7 @@ namespace BallisticPenetration.Core.Physics
         TotalLossInvalid = 6
     }
 
-    public readonly struct PhysicalLossBudget
+    public readonly struct PhysicalLossBudget : IEquatable<PhysicalLossBudget>
     {
         public PhysicalLossBudget(
             double penetrationLossJoules,
@@ -95,6 +97,43 @@ namespace BallisticPenetration.Core.Physics
             return true;
         }
 
+        public bool Equals(PhysicalLossBudget other)
+        {
+            return PenetrationLossJoules.Equals(other.PenetrationLossJoules)
+                && DeformationLossJoules.Equals(other.DeformationLossJoules)
+                && FractureLossJoules.Equals(other.FractureLossJoules)
+                && HeatLossJoules.Equals(other.HeatLossJoules)
+                && OtherLossJoules.Equals(other.OtherLossJoules);
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is PhysicalLossBudget other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = PenetrationLossJoules.GetHashCode();
+                hash = (hash * 397) ^ DeformationLossJoules.GetHashCode();
+                hash = (hash * 397) ^ FractureLossJoules.GetHashCode();
+                hash = (hash * 397) ^ HeatLossJoules.GetHashCode();
+                hash = (hash * 397) ^ OtherLossJoules.GetHashCode();
+                return hash;
+            }
+        }
+
+        public static bool operator ==(PhysicalLossBudget left, PhysicalLossBudget right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(PhysicalLossBudget left, PhysicalLossBudget right)
+        {
+            return !left.Equals(right);
+        }
+
         private static bool IsFiniteNonNegative(double value)
         {
             return FiniteDouble.IsFinite(value) && value >= 0d;
@@ -120,10 +159,24 @@ namespace BallisticPenetration.Core.Physics
         ChildEnergyExceedsResidual = 14,
         ProjectileFragmentMissing = 15,
         DerivedTotalInvalid = 16,
-        SourceCollisionMismatch = 17
+        SourceCollisionMismatch = 17,
+        FragmentMassReservationInvalid = 18,
+        FragmentEnergyReservationInvalid = 19,
+        StateRevisionIdentityMismatch = 20,
+        StateRevisionLineageMismatch = 21,
+        StateRevisionHistoryMismatch = 22,
+        StateRevisionOriginalMassMismatch = 23,
+        ResponseMassNotClosed = 24,
+        ResponseEnergyNotClosed = 25,
+        StateRevisionKindMismatch = 26,
+        StateRevisionNominalGeometryMismatch = 27,
+        StateRevisionCollisionMismatch = 28,
+        ResponseCollisionMissing = 29,
+        FragmentReservationOutcomeMismatch = 30,
+        StateRevisionTerminalStateMismatch = 31
     }
 
-    public readonly struct PhysicalConservationResult
+    public readonly struct PhysicalConservationResult : IEquatable<PhysicalConservationResult>
     {
         internal PhysicalConservationResult(
             double availableProjectileMassKilograms,
@@ -181,15 +234,264 @@ namespace BallisticPenetration.Core.Physics
         {
             get { return ResidualEnergyJoules - ChildEnergyJoules; }
         }
+
+        public bool Equals(PhysicalConservationResult other)
+        {
+            return AvailableProjectileMassKilograms.Equals(other.AvailableProjectileMassKilograms)
+                && AllocatedProjectileMassKilograms.Equals(other.AllocatedProjectileMassKilograms)
+                && RetainedProjectileMassKilograms.Equals(other.RetainedProjectileMassKilograms)
+                && TargetSpallMassKilograms.Equals(other.TargetSpallMassKilograms)
+                && ParentEnergyJoules.Equals(other.ParentEnergyJoules)
+                && ModeledLossEnergyJoules.Equals(other.ModeledLossEnergyJoules)
+                && ResidualEnergyJoules.Equals(other.ResidualEnergyJoules)
+                && ChildEnergyJoules.Equals(other.ChildEnergyJoules)
+                && ProjectileOutputCount == other.ProjectileOutputCount
+                && TargetSpallOutputCount == other.TargetSpallOutputCount;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is PhysicalConservationResult other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = AvailableProjectileMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ AllocatedProjectileMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ RetainedProjectileMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ TargetSpallMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ ParentEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ ModeledLossEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ ResidualEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ ChildEnergyJoules.GetHashCode();
+                hash = (hash * 397) ^ ProjectileOutputCount;
+                hash = (hash * 397) ^ TargetSpallOutputCount;
+                return hash;
+            }
+        }
+
+        public static bool operator ==(
+            PhysicalConservationResult left,
+            PhysicalConservationResult right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(
+            PhysicalConservationResult left,
+            PhysicalConservationResult right)
+        {
+            return !left.Equals(right);
+        }
     }
 
     public static class PhysicalProjectileConservation
     {
         private const double RelativeTolerance = 0.000000001d;
 
+        /// <summary>
+        /// Validates a new immutable state of the same physical component plus mass and energy
+        /// reserved for fragment children that have not been constructed yet.
+        /// </summary>
+        public static bool TryValidateDeformationResponse(
+            PhysicalProjectileState? parent,
+            PhysicalProjectileState? primaryRevision,
+            PhysicalCollisionRecord? responseCollision,
+            double reservedFragmentMassKilograms,
+            double reservedFragmentEnergyJoules,
+            PhysicalLossBudget lossBudget,
+            out PhysicalConservationResult result,
+            out PhysicalConservationFailureReason failureReason)
+        {
+            result = default;
+            if (parent == null)
+            {
+                failureReason = PhysicalConservationFailureReason.ParentMissing;
+                return false;
+            }
+
+            if (responseCollision == null)
+            {
+                failureReason = PhysicalConservationFailureReason.ResponseCollisionMissing;
+                return false;
+            }
+
+            PhysicalLossBudgetFailureReason lossFailureReason;
+            if (!lossBudget.IsValid(out lossFailureReason))
+            {
+                failureReason = PhysicalConservationFailureReason.LossBudgetInvalid;
+                return false;
+            }
+
+            if (!IsFiniteNonNegative(reservedFragmentMassKilograms))
+            {
+                failureReason = PhysicalConservationFailureReason.FragmentMassReservationInvalid;
+                return false;
+            }
+
+            if (!IsFiniteNonNegative(reservedFragmentEnergyJoules))
+            {
+                failureReason = PhysicalConservationFailureReason.FragmentEnergyReservationInvalid;
+                return false;
+            }
+
+            double parentEnergyJoules = parent.TranslationalKineticEnergyJoules;
+            double energyTolerance = Math.Max(1d, parentEnergyJoules) * RelativeTolerance;
+            double massTolerance = Math.Max(
+                0.000000001d,
+                parent.RetainedMassKilograms * RelativeTolerance);
+            if (lossBudget.TotalLossJoules > parentEnergyJoules + energyTolerance)
+            {
+                failureReason = PhysicalConservationFailureReason.LossesExceedParentEnergy;
+                return false;
+            }
+
+            double residualEnergyJoules = Math.Max(
+                0d,
+                parentEnergyJoules - lossBudget.TotalLossJoules);
+            double recordedOutgoingSpeedMetresPerSecond =
+                responseCollision.OutgoingVelocityMetresPerSecond.Magnitude;
+            double recordedOutgoingEnergyFromVelocityJoules = 0.5d
+                * parent.RetainedMassKilograms
+                * recordedOutgoingSpeedMetresPerSecond
+                * recordedOutgoingSpeedMetresPerSecond;
+            if (responseCollision.Sequence != parent.CollisionHistory.Count
+                || responseCollision.IncomingVelocityMetresPerSecond
+                    != parent.VelocityMetresPerSecond
+                || !responseCollision.IncomingTranslationalEnergyJoules.Equals(
+                    parentEnergyJoules)
+                || Math.Abs(
+                    responseCollision.OutgoingTranslationalEnergyJoules
+                        - residualEnergyJoules) > energyTolerance
+                || !FiniteDouble.IsFinite(recordedOutgoingEnergyFromVelocityJoules)
+                || Math.Abs(recordedOutgoingEnergyFromVelocityJoules - residualEnergyJoules)
+                    > energyTolerance)
+            {
+                failureReason = PhysicalConservationFailureReason.StateRevisionCollisionMismatch;
+                return false;
+            }
+
+            bool fragmentedOutcome = responseCollision.Outcome
+                == PhysicalCollisionOutcome.Fragmented;
+            bool hasFragmentMassReservation = reservedFragmentMassKilograms > massTolerance;
+            bool hasFragmentEnergyReservation = reservedFragmentEnergyJoules > energyTolerance;
+            if (fragmentedOutcome != hasFragmentMassReservation
+                || fragmentedOutcome != hasFragmentEnergyReservation)
+            {
+                failureReason = PhysicalConservationFailureReason.FragmentReservationOutcomeMismatch;
+                return false;
+            }
+
+            double primaryMassKilograms = 0d;
+            double primaryEnergyJoules = 0d;
+            int primaryOutputCount = 0;
+            if (primaryRevision != null)
+            {
+                if (!string.Equals(
+                    primaryRevision.ProjectileId,
+                    parent.ProjectileId,
+                    StringComparison.Ordinal))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionIdentityMismatch;
+                    return false;
+                }
+
+                if (!HasSameLineage(parent, primaryRevision))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionLineageMismatch;
+                    return false;
+                }
+
+                if (!IsValidStateRevisionKind(parent.Kind, primaryRevision.Kind))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionKindMismatch;
+                    return false;
+                }
+
+                if (!parent.OriginalMassKilograms.Equals(primaryRevision.OriginalMassKilograms))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionOriginalMassMismatch;
+                    return false;
+                }
+
+                if (!parent.NominalDiameterMetres.Equals(primaryRevision.NominalDiameterMetres))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionNominalGeometryMismatch;
+                    return false;
+                }
+
+                if (!HasAppendedCollisionHistory(parent, primaryRevision))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionHistoryMismatch;
+                    return false;
+                }
+
+                PhysicalCollisionRecord appendedCollision = primaryRevision.CollisionHistory[
+                    primaryRevision.CollisionHistory.Count - 1];
+                if (appendedCollision != responseCollision)
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionCollisionMismatch;
+                    return false;
+                }
+
+                if (primaryRevision.TerminalState
+                    != SelectTerminalState(responseCollision.Outcome))
+                {
+                    failureReason = PhysicalConservationFailureReason.StateRevisionTerminalStateMismatch;
+                    return false;
+                }
+
+                primaryMassKilograms = primaryRevision.RetainedMassKilograms;
+                primaryEnergyJoules = primaryRevision.TranslationalKineticEnergyJoules;
+                primaryOutputCount = 1;
+            }
+
+            double allocatedMassKilograms = primaryMassKilograms
+                + reservedFragmentMassKilograms;
+            double allocatedEnergyJoules = primaryEnergyJoules
+                + reservedFragmentEnergyJoules;
+            if (!AreFiniteNonNegative(
+                residualEnergyJoules,
+                allocatedMassKilograms,
+                allocatedEnergyJoules))
+            {
+                failureReason = PhysicalConservationFailureReason.DerivedTotalInvalid;
+                return false;
+            }
+
+            if (Math.Abs(allocatedMassKilograms - parent.RetainedMassKilograms)
+                > massTolerance)
+            {
+                failureReason = PhysicalConservationFailureReason.ResponseMassNotClosed;
+                return false;
+            }
+
+            if (Math.Abs(allocatedEnergyJoules - residualEnergyJoules) > energyTolerance)
+            {
+                failureReason = PhysicalConservationFailureReason.ResponseEnergyNotClosed;
+                return false;
+            }
+
+            result = new PhysicalConservationResult(
+                parent.RetainedMassKilograms,
+                allocatedMassKilograms,
+                allocatedMassKilograms,
+                0d,
+                parentEnergyJoules,
+                lossBudget.TotalLossJoules,
+                residualEnergyJoules,
+                allocatedEnergyJoules,
+                primaryOutputCount,
+                0);
+            failureReason = PhysicalConservationFailureReason.None;
+            return true;
+        }
+
         public static bool TryValidateTransition(
-            PhysicalProjectileState parent,
-            IReadOnlyList<PhysicalProjectileState> outputs,
+            PhysicalProjectileState? parent,
+            IReadOnlyList<PhysicalProjectileState?>? outputs,
             PhysicalLossBudget lossBudget,
             out PhysicalConservationResult result,
             out PhysicalConservationFailureReason failureReason)
@@ -204,8 +506,8 @@ namespace BallisticPenetration.Core.Physics
         }
 
         public static bool TryValidateFragmentationTransition(
-            PhysicalProjectileState parent,
-            IReadOnlyList<PhysicalProjectileState> outputs,
+            PhysicalProjectileState? parent,
+            IReadOnlyList<PhysicalProjectileState?>? outputs,
             PhysicalLossBudget lossBudget,
             out PhysicalConservationResult result,
             out PhysicalConservationFailureReason failureReason)
@@ -220,8 +522,8 @@ namespace BallisticPenetration.Core.Physics
         }
 
         private static bool TryValidate(
-            PhysicalProjectileState parent,
-            IReadOnlyList<PhysicalProjectileState> outputs,
+            PhysicalProjectileState? parent,
+            IReadOnlyList<PhysicalProjectileState?>? outputs,
             PhysicalLossBudget lossBudget,
             bool requireProjectileFragment,
             out PhysicalConservationResult result,
@@ -263,13 +565,13 @@ namespace BallisticPenetration.Core.Physics
             int projectileOutputCount = 0;
             int targetSpallOutputCount = 0;
             bool hasProjectileFragment = false;
-            string sourceCollisionId = null;
+            string? sourceCollisionId = null;
             var childIds = new HashSet<string>(StringComparer.Ordinal);
             var fragmentIndices = new HashSet<int>();
 
             for (int index = 0; index < outputs.Count; index++)
             {
-                PhysicalProjectileState child = outputs[index];
+                PhysicalProjectileState? child = outputs[index];
                 if (child == null)
                 {
                     failureReason = PhysicalConservationFailureReason.ChildMissing;
@@ -403,6 +705,89 @@ namespace BallisticPenetration.Core.Physics
             }
 
             return true;
+        }
+
+        private static bool IsFiniteNonNegative(double value)
+        {
+            return FiniteDouble.IsFinite(value) && value >= 0d;
+        }
+
+        private static bool HasSameLineage(
+            PhysicalProjectileState parent,
+            PhysicalProjectileState revision)
+        {
+            return string.Equals(revision.RootShotId, parent.RootShotId, StringComparison.Ordinal)
+                && string.Equals(
+                    revision.ParentProjectileId,
+                    parent.ParentProjectileId,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    revision.SourceProjectileId,
+                    parent.SourceProjectileId,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    revision.SourceMaterialId,
+                    parent.SourceMaterialId,
+                    StringComparison.Ordinal)
+                && revision.SourceMaterialClass == parent.SourceMaterialClass
+                && string.Equals(
+                    revision.SourceCollisionId,
+                    parent.SourceCollisionId,
+                    StringComparison.Ordinal)
+                && revision.FragmentIndex == parent.FragmentIndex
+                && revision.FragmentGeneration == parent.FragmentGeneration
+                && revision.DeterministicSeed == parent.DeterministicSeed
+                && revision.Construction == parent.Construction;
+        }
+
+        private static bool HasAppendedCollisionHistory(
+            PhysicalProjectileState parent,
+            PhysicalProjectileState revision)
+        {
+            if (revision.CollisionHistory.Count != parent.CollisionHistory.Count + 1)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < parent.CollisionHistory.Count; index++)
+            {
+                if (revision.CollisionHistory[index] != parent.CollisionHistory[index])
+                {
+                    return false;
+                }
+            }
+
+            return revision.CollisionHistory[parent.CollisionHistory.Count].Sequence
+                == parent.CollisionHistory.Count;
+        }
+
+        private static bool IsValidStateRevisionKind(
+            PhysicalProjectileKind parentKind,
+            PhysicalProjectileKind revisionKind)
+        {
+            if (parentKind == PhysicalProjectileKind.IntactProjectile)
+            {
+                return revisionKind == PhysicalProjectileKind.IntactProjectile
+                    || revisionKind == PhysicalProjectileKind.DeformedProjectile;
+            }
+
+            return revisionKind == parentKind;
+        }
+
+        private static PhysicalProjectileTerminalState SelectTerminalState(
+            PhysicalCollisionOutcome outcome)
+        {
+            if (outcome == PhysicalCollisionOutcome.Stopped)
+            {
+                return PhysicalProjectileTerminalState.Stopped;
+            }
+
+            if (outcome == PhysicalCollisionOutcome.Ricocheted)
+            {
+                return PhysicalProjectileTerminalState.Continuing;
+            }
+
+            return PhysicalProjectileTerminalState.Exited;
         }
     }
 }

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using BallisticPenetration.Core;
 
@@ -137,12 +139,56 @@ namespace BallisticPenetration.Core.Physics
             return new PhysicalVector3(X * factor, Y * factor, Z * factor);
         }
 
+        public PhysicalVector3 Add(PhysicalVector3 other)
+        {
+            return new PhysicalVector3(X + other.X, Y + other.Y, Z + other.Z);
+        }
+
+        public PhysicalVector3 Subtract(PhysicalVector3 other)
+        {
+            return new PhysicalVector3(X - other.X, Y - other.Y, Z - other.Z);
+        }
+
+        public PhysicalVector3 Negate()
+        {
+            return new PhysicalVector3(-X, -Y, -Z);
+        }
+
+        public double Dot(PhysicalVector3 other)
+        {
+            return (X * other.X) + (Y * other.Y) + (Z * other.Z);
+        }
+
+        public bool TryNormalize(out PhysicalVector3 unitVector)
+        {
+            unitVector = Zero;
+            if (!IsFinite)
+            {
+                return false;
+            }
+
+            double magnitude = Magnitude;
+            if (!FiniteDouble.IsFinite(magnitude) || magnitude <= 0d)
+            {
+                return false;
+            }
+
+            PhysicalVector3 candidate = Scale(1d / magnitude);
+            if (!candidate.IsFinite)
+            {
+                return false;
+            }
+
+            unitVector = candidate;
+            return true;
+        }
+
         public bool Equals(PhysicalVector3 other)
         {
             return X.Equals(other.X) && Y.Equals(other.Y) && Z.Equals(other.Z);
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is PhysicalVector3 other && Equals(other);
         }
@@ -157,6 +203,16 @@ namespace BallisticPenetration.Core.Physics
                 hash = (hash * 31) + Z.GetHashCode();
                 return hash;
             }
+        }
+
+        public static bool operator ==(PhysicalVector3 left, PhysicalVector3 right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(PhysicalVector3 left, PhysicalVector3 right)
+        {
+            return !left.Equals(right);
         }
 
         public static PhysicalVector3 Zero
@@ -218,7 +274,7 @@ namespace BallisticPenetration.Core.Physics
                 && W.Equals(other.W);
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is PhysicalOrientation other && Equals(other);
         }
@@ -234,6 +290,16 @@ namespace BallisticPenetration.Core.Physics
                 hash = (hash * 31) + W.GetHashCode();
                 return hash;
             }
+        }
+
+        public static bool operator ==(PhysicalOrientation left, PhysicalOrientation right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(PhysicalOrientation left, PhysicalOrientation right)
+        {
+            return !left.Equals(right);
         }
 
         public static PhysicalOrientation Identity

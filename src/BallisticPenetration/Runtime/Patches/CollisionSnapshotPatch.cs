@@ -35,7 +35,7 @@ namespace BallisticPenetration.Runtime.Patches
         private static void Prefix(
             Shot __instance,
             Vector3 prevVector3,
-            out CollisionContext __state)
+            out CollisionContext? __state)
         {
             __state = null;
 
@@ -46,7 +46,7 @@ namespace BallisticPenetration.Runtime.Patches
                     return;
                 }
 
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null)
                 {
                     return;
@@ -65,7 +65,7 @@ namespace BallisticPenetration.Runtime.Patches
 
                 float damage = __instance.Damage;
                 float penetrationPower = __instance.PenetrationPower;
-                AmmoTemplate ammoTemplate = __instance.Ammo?.Template as AmmoTemplate;
+                AmmoTemplate? ammoTemplate = __instance.Ammo?.Template as AmmoTemplate;
                 float templateInitialSpeed = ammoTemplate != null ? ammoTemplate.InitialSpeed : 0f;
 
                 CollisionAdjustmentResult result = DetermineInitialResult(
@@ -76,8 +76,8 @@ namespace BallisticPenetration.Runtime.Patches
                     penetrationPower,
                     templateInitialSpeed);
 
-                string templateId = ammoTemplate != null ? ammoTemplate.StringId : null;
-                string templateName = ammoTemplate != null ? ammoTemplate.Name : null;
+                string? templateId = ammoTemplate != null ? ammoTemplate.StringId : null;
+                string? templateName = ammoTemplate != null ? ammoTemplate.Name : null;
                 bool hasPreviousFramePosition = diagnosticsEnabled && IsFiniteVector3(prevVector3);
 
                 CollisionContext context = new CollisionContext(
@@ -100,10 +100,10 @@ namespace BallisticPenetration.Runtime.Patches
         }
 
         [PatchFinalizer]
-        private static Exception Finalizer(
+        private static Exception? Finalizer(
             Shot __instance,
-            CollisionContext __state,
-            Exception __exception)
+            CollisionContext? __state,
+            Exception? __exception)
         {
             try
             {
@@ -123,7 +123,7 @@ namespace BallisticPenetration.Runtime.Patches
         private static CollisionAdjustmentResult DetermineInitialResult(
             bool pluginEnabled,
             bool isForwardHit,
-            AmmoTemplate ammoTemplate,
+            AmmoTemplate? ammoTemplate,
             float damage,
             float penetrationPower,
             float templateInitialSpeed)

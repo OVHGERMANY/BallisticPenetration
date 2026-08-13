@@ -35,7 +35,7 @@ namespace BallisticPenetration.Runtime.Patches
         [HarmonyPriority(Priority.Last)]
         private static void Prefix(Shot __instance)
         {
-            CollisionContext context = null;
+            CollisionContext? context = null;
             float impactSpeed = 0f;
             BallisticFalloffFactors diagnosticFactors = BallisticFalloffFactors.NeutralFallback;
 
@@ -60,7 +60,7 @@ namespace BallisticPenetration.Runtime.Patches
                 // point. Zero is valid and is never raised to a floor.
                 impactSpeed = __instance._currentVelocity.magnitude;
 
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.Enabled.Value)
                 {
                     context.AdjustmentResult = CollisionAdjustmentResult.PluginDisabled;

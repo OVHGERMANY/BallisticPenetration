@@ -17,15 +17,15 @@ namespace BallisticPenetration.Runtime.Diagnostics
         private const float TraceLineWidth = 0.025f;
         private const float MinimumRenderableSegmentLength = 0.001f;
 
-        private static Type _guiType;
-        private static MethodInfo _guiBox;
-        private static MethodInfo _guiLabel;
+        private static Type? _guiType;
+        private static MethodInfo? _guiBox;
+        private static MethodInfo? _guiLabel;
         private static float _lastGuiLookupAt;
         private static bool _hasAttemptedGuiLookup;
 
-        private LineRenderer _trajectoryLine;
-        private readonly LineRenderer[] _impactCrossLines = new LineRenderer[3];
-        private Material _traceMaterial;
+        private LineRenderer? _trajectoryLine;
+        private readonly LineRenderer?[] _impactCrossLines = new LineRenderer?[3];
+        private Material? _traceMaterial;
         private long _lastVisualizedSequence = -1L;
         private float _traceExpiresAt;
 
@@ -33,7 +33,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.EnableInGameDiagnostics.Value)
                 {
                     HideVisuals();
@@ -46,7 +46,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     HideVisuals();
                 }
 
-                AdjustmentDiagnosticRecord latest;
+                AdjustmentDiagnosticRecord? latest;
                 if (!DiagnosticsRuntime.TryGetLatest(out latest) || latest == null)
                 {
                     return;
@@ -78,9 +78,14 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
         private void OnGUI()
         {
+            if (!isActiveAndEnabled)
+            {
+                return;
+            }
+
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null
                     || !configuration.EnableInGameDiagnostics.Value
                     || !configuration.ShowLatestAdjustmentOverlay.Value
@@ -89,7 +94,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     return;
                 }
 
-                AdjustmentDiagnosticRecord latest;
+                AdjustmentDiagnosticRecord? latest;
                 if (!DiagnosticsRuntime.TryGetLatest(out latest)
                     || latest == null
                     || HasExpired(GetSafeRealtimeSeconds(), latest.RecordedAtSeconds + configuration.OverlayLifetimeSeconds.Value))
@@ -128,7 +133,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 return;
             }
 
-            Material material = GetTraceMaterial();
+            Material? material = GetTraceMaterial();
             if (material == null || !EnsureLinePool(material))
             {
                 return;
@@ -136,7 +141,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             if (record.HasTrajectoryPath)
             {
-                Vector3[] boundedPath = CreateBoundedPath(
+                Vector3[]? boundedPath = CreateBoundedPath(
                     record.TrajectoryPoints,
                     configuration.MaximumTraceSegmentMeters.Value);
                 if (boundedPath != null && boundedPath.Length >= 2)
@@ -216,9 +221,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        private LineRenderer CreatePooledLine(string suffix, Material material)
+        private LineRenderer? CreatePooledLine(string suffix, Material material)
         {
-            GameObject lineObject = null;
+            GameObject? lineObject = null;
             try
             {
                 lineObject = new GameObject("Janky-BallisticPenetration." + suffix);
@@ -247,7 +252,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        private static void ConfigureLine(LineRenderer line, Vector3 start, Vector3 end, Color color, float width)
+        private static void ConfigureLine(LineRenderer? line, Vector3 start, Vector3 end, Color color, float width)
         {
             if (line == null)
             {
@@ -264,7 +269,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             line.enabled = true;
         }
 
-        private static void ConfigurePolyline(LineRenderer line, Vector3[] points, Color color, float width)
+        private static void ConfigurePolyline(LineRenderer? line, Vector3[]? points, Color color, float width)
         {
             if (line == null || points == null || points.Length < 2)
             {
@@ -280,7 +285,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             line.enabled = true;
         }
 
-        private static Vector3[] CreateBoundedPath(Vector3[] points, float maximumLength)
+        private static Vector3[]? CreateBoundedPath(Vector3[]? points, float maximumLength)
         {
             if (points == null || points.Length < 2 || !IsPositiveFinite(maximumLength))
             {
@@ -329,14 +334,14 @@ namespace BallisticPenetration.Runtime.Diagnostics
             return backwardsPath.ToArray();
         }
 
-        private Material GetTraceMaterial()
+        private Material? GetTraceMaterial()
         {
             if (_traceMaterial != null)
             {
                 return _traceMaterial;
             }
 
-            Shader shader = Shader.Find("Sprites/Default")
+            Shader? shader = Shader.Find("Sprites/Default")
                 ?? Shader.Find("Unlit/Color")
                 ?? Shader.Find("Hidden/Internal-Colored");
             if (shader == null)
@@ -360,7 +365,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             for (int index = 0; index < _impactCrossLines.Length; index++)
             {
-                if (_impactCrossLines[index] != null && _impactCrossLines[index].enabled)
+                LineRenderer? line = _impactCrossLines[index];
+                if (line != null && line.enabled)
                 {
                     return true;
                 }
@@ -378,9 +384,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             for (int index = 0; index < _impactCrossLines.Length; index++)
             {
-                if (_impactCrossLines[index] != null)
+                LineRenderer? line = _impactCrossLines[index];
+                if (line != null)
                 {
-                    _impactCrossLines[index].enabled = false;
+                    line.enabled = false;
                 }
             }
 
@@ -399,7 +406,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        private static void DestroyPooledLine(LineRenderer line)
+        private static void DestroyPooledLine(LineRenderer? line)
         {
             if (line != null)
             {
@@ -411,7 +418,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                if (!TryGetGuiMethods(out MethodInfo box, out MethodInfo label))
+                MethodInfo? box;
+                MethodInfo? label;
+                if (!TryGetGuiMethods(out box, out label) || box == null || label == null)
                 {
                     return;
                 }
@@ -428,7 +437,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        private static bool TryGetGuiMethods(out MethodInfo box, out MethodInfo label)
+        private static bool TryGetGuiMethods(out MethodInfo? box, out MethodInfo? label)
         {
             box = _guiBox;
             label = _guiLabel;

@@ -135,9 +135,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             bool hasTraceSegment = hasImpactPosition && context.HasPreviousFramePosition;
             Vector3[] trajectoryPoints = captureTrajectoryPath && hasImpactPosition
-                ? CaptureBoundedTrajectory(shot, impactPosition)
-                : null;
-            bool hasTrajectoryPath = trajectoryPoints != null && trajectoryPoints.Length >= 2;
+                ? CaptureBoundedTrajectory(shot, impactPosition) ?? Array.Empty<Vector3>()
+                : Array.Empty<Vector3>();
+            bool hasTrajectoryPath = trajectoryPoints.Length >= 2;
             return new AdjustmentDiagnosticRecord(
                 GetSafeRealtimeSeconds(),
                 context.TemplateId ?? "(unknown)",
@@ -257,11 +257,11 @@ namespace BallisticPenetration.Runtime.Diagnostics
             return HasTraceSegment ? "   trace: captured" : "   trace: unavailable";
         }
 
-        private static Vector3[] CaptureBoundedTrajectory(Shot shot, Vector3 impactPosition)
+        private static Vector3[]? CaptureBoundedTrajectory(Shot shot, Vector3 impactPosition)
         {
             try
             {
-                IList<Vector3> history = shot.PositionHistory;
+                List<Vector3>? history = shot.PositionHistory;
                 if (history == null || history.Count == 0)
                 {
                     return null;

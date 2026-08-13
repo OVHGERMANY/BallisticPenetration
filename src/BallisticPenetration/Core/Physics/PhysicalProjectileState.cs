@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -40,7 +42,8 @@ namespace BallisticPenetration.Core.Physics
         DuplicateCollisionId = 30,
         DerivedValueInvalid = 31,
         MaterialOriginMismatch = 32,
-        DamageCapabilityExceedsEnergy = 33
+        DamageCapabilityExceedsEnergy = 33,
+        CollisionSequenceMismatch = 34
     }
 
     /// <summary>
@@ -54,24 +57,24 @@ namespace BallisticPenetration.Core.Physics
             FragmentIndex = -1;
             Orientation = PhysicalOrientation.Identity;
             RenderState = PhysicalProjectileRenderState.NotRendered;
-            CollisionHistory = Array.Empty<PhysicalCollisionRecord>();
+            CollisionHistory = Array.Empty<PhysicalCollisionRecord?>();
         }
 
         public PhysicalProjectileKind Kind { get; set; }
 
-        public string ProjectileId { get; set; }
+        public string? ProjectileId { get; set; }
 
-        public string RootShotId { get; set; }
+        public string? RootShotId { get; set; }
 
-        public string ParentProjectileId { get; set; }
+        public string? ParentProjectileId { get; set; }
 
-        public string SourceProjectileId { get; set; }
+        public string? SourceProjectileId { get; set; }
 
-        public string SourceMaterialId { get; set; }
+        public string? SourceMaterialId { get; set; }
 
         public PhysicalMaterialClass SourceMaterialClass { get; set; }
 
-        public string SourceCollisionId { get; set; }
+        public string? SourceCollisionId { get; set; }
 
         public int FragmentIndex { get; set; }
 
@@ -127,7 +130,7 @@ namespace BallisticPenetration.Core.Physics
 
         public PhysicalProjectileRenderState RenderState { get; set; }
 
-        public IReadOnlyList<PhysicalCollisionRecord> CollisionHistory { get; set; }
+        public IReadOnlyList<PhysicalCollisionRecord?>? CollisionHistory { get; set; }
     }
 
     /// <summary>
@@ -144,6 +147,9 @@ namespace BallisticPenetration.Core.Physics
 
         private PhysicalProjectileState(
             PhysicalProjectileStateInput input,
+            string projectileId,
+            string rootShotId,
+            IReadOnlyList<PhysicalCollisionRecord> collisionHistory,
             double speedMetresPerSecond,
             double translationalEnergyJoules,
             double equivalentDiameterMetres,
@@ -151,8 +157,8 @@ namespace BallisticPenetration.Core.Physics
             double ballisticCoefficientKilogramsPerSquareMetre)
         {
             Kind = input.Kind;
-            ProjectileId = input.ProjectileId;
-            RootShotId = input.RootShotId;
+            ProjectileId = projectileId;
+            RootShotId = rootShotId;
             ParentProjectileId = input.ParentProjectileId;
             SourceProjectileId = input.SourceProjectileId;
             SourceMaterialId = input.SourceMaterialId;
@@ -186,10 +192,10 @@ namespace BallisticPenetration.Core.Physics
             TerminalState = input.TerminalState;
             RenderState = input.RenderState;
 
-            var historyCopy = new PhysicalCollisionRecord[input.CollisionHistory.Count];
+            var historyCopy = new PhysicalCollisionRecord[collisionHistory.Count];
             for (int index = 0; index < historyCopy.Length; index++)
             {
-                historyCopy[index] = input.CollisionHistory[index];
+                historyCopy[index] = collisionHistory[index];
             }
 
             _collisionHistory = Array.AsReadOnly(historyCopy);
@@ -201,15 +207,15 @@ namespace BallisticPenetration.Core.Physics
 
         public string RootShotId { get; }
 
-        public string ParentProjectileId { get; }
+        public string? ParentProjectileId { get; }
 
-        public string SourceProjectileId { get; }
+        public string? SourceProjectileId { get; }
 
-        public string SourceMaterialId { get; }
+        public string? SourceMaterialId { get; }
 
         public PhysicalMaterialClass SourceMaterialClass { get; }
 
-        public string SourceCollisionId { get; }
+        public string? SourceCollisionId { get; }
 
         public int FragmentIndex { get; }
 
@@ -281,8 +287,8 @@ namespace BallisticPenetration.Core.Physics
         }
 
         public static bool TryCreate(
-            PhysicalProjectileStateInput input,
-            out PhysicalProjectileState state,
+            PhysicalProjectileStateInput? input,
+            out PhysicalProjectileState? state,
             out PhysicalProjectileStateFailureReason failureReason)
         {
             state = null;
@@ -299,13 +305,15 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(input.ProjectileId))
+            string? projectileId = input.ProjectileId;
+            if (string.IsNullOrWhiteSpace(projectileId))
             {
                 failureReason = PhysicalProjectileStateFailureReason.ProjectileIdMissing;
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(input.RootShotId))
+            string? rootShotId = input.RootShotId;
+            if (string.IsNullOrWhiteSpace(rootShotId))
             {
                 failureReason = PhysicalProjectileStateFailureReason.RootShotIdMissing;
                 return false;
@@ -501,16 +509,18 @@ namespace BallisticPenetration.Core.Physics
                 }
             }
 
-            if (input.CollisionHistory == null)
+            IReadOnlyList<PhysicalCollisionRecord?>? collisionHistory = input.CollisionHistory;
+            if (collisionHistory == null)
             {
                 failureReason = PhysicalProjectileStateFailureReason.CollisionHistoryEntryMissing;
                 return false;
             }
 
             var collisionIds = new HashSet<string>(StringComparer.Ordinal);
-            for (int index = 0; index < input.CollisionHistory.Count; index++)
+            var validatedHistory = new List<PhysicalCollisionRecord>(collisionHistory.Count);
+            for (int index = 0; index < collisionHistory.Count; index++)
             {
-                PhysicalCollisionRecord record = input.CollisionHistory[index];
+                PhysicalCollisionRecord? record = collisionHistory[index];
                 if (record == null)
                 {
                     failureReason = PhysicalProjectileStateFailureReason.CollisionHistoryEntryMissing;
@@ -522,6 +532,14 @@ namespace BallisticPenetration.Core.Physics
                     failureReason = PhysicalProjectileStateFailureReason.DuplicateCollisionId;
                     return false;
                 }
+
+                if (record.Sequence != index)
+                {
+                    failureReason = PhysicalProjectileStateFailureReason.CollisionSequenceMismatch;
+                    return false;
+                }
+
+                validatedHistory.Add(record);
             }
 
             double translationalEnergyJoules = 0.5d
@@ -564,6 +582,9 @@ namespace BallisticPenetration.Core.Physics
 
             state = new PhysicalProjectileState(
                 input,
+                projectileId,
+                rootShotId,
+                validatedHistory,
                 speedMetresPerSecond,
                 translationalEnergyJoules,
                 equivalentDiameterMetres,

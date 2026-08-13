@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace BallisticPenetration.Core
 {
     internal enum PostmortemArmorTraversalStep
