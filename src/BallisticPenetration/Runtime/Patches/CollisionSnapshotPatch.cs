@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using EFT.Ballistics;
 using EFT.InventoryLogic;
@@ -32,6 +33,10 @@ namespace BallisticPenetration.Runtime.Patches
 
         [PatchPrefix]
         [HarmonyPriority(Priority.Last)]
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "The Harmony prefix must leave vanilla collision handling untouched for every compatibility failure.")]
         private static void Prefix(
             Shot __instance,
             Vector3 prevVector3,
@@ -100,6 +105,10 @@ namespace BallisticPenetration.Runtime.Patches
         }
 
         [PatchFinalizer]
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "The Harmony finalizer must preserve the game's original exception while cleaning stale state.")]
         private static Exception? Finalizer(
             Shot __instance,
             CollisionContext? __state,

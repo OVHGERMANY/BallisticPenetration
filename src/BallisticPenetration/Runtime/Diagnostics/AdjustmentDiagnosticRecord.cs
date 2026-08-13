@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using EFT.Ballistics;
 using UnityEngine;
@@ -111,6 +112,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
         internal Vector3[] TrajectoryPoints { get; private set; }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Diagnostic snapshots must tolerate every pooled-shot collection failure without changing ballistics.")]
         internal static AdjustmentDiagnosticRecord Capture(
             Shot shot,
             CollisionContext context,
@@ -257,6 +262,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             return HasTraceSegment ? "   trace: captured" : "   trace: unavailable";
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Trajectory history is optional pooled diagnostic data and must fail open.")]
         private static Vector3[]? CaptureBoundedTrajectory(Shot shot, Vector3 impactPosition)
         {
             try

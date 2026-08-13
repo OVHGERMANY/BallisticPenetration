@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using EFT.Ballistics;
 using UnityEngine;
 using BallisticPenetration.Core;
@@ -15,6 +16,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
         private static readonly object HostGate = new object();
         private static DiagnosticsOverlayBehaviour? _host;
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Diagnostic capture must fail open for arbitrary pooled EFT shot data failures.")]
         internal static void TryRecordAdjustment(
             Shot shot,
             CollisionContext context,
@@ -52,6 +57,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
         /// Called exclusively from BaseUnityPlugin.Update on Unity's main thread.
         /// Collision hooks record data only and never create Unity objects.
         /// </summary>
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional presentation must not propagate Unity or rendering failures into the game loop.")]
         internal static void UpdatePresentation()
         {
             try
@@ -77,6 +86,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Shutdown must clear diagnostic state even when Unity object destruction fails.")]
         internal static void Shutdown()
         {
             try
@@ -101,6 +114,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional Unity host creation must disable diagnostics instead of breaking a frame.")]
         private static void EnsurePresentationHost()
         {
             lock (HostGate)

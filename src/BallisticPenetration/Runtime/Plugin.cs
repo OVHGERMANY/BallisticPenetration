@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using BepInEx;
@@ -13,11 +14,14 @@ using BallisticPenetration.Runtime.Patches;
 
 namespace BallisticPenetration
 {
+    // BepInEx GUID fields are reverse-domain plugin identifiers, not System.Guid values.
+#pragma warning disable CA2243
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     [BepInProcess("EscapeFromTarkov.exe")]
     [BepInDependency(
         SptVersionCompatibility.CorePluginGuid,
         SptVersionCompatibility.SupportedCoreVersionText)]
+#pragma warning restore CA2243
     public sealed class Plugin : BaseUnityPlugin
     {
         internal const string PluginGuid = "com.janky.ballisticpenetration";
@@ -109,6 +113,10 @@ namespace BallisticPenetration
             DiagnosticsRuntime.UpdatePresentation();
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Logging must never replace an exception raised by the game or another patch.")]
         internal static void LogHookFailure(string hookName, Exception exception)
         {
             try
@@ -168,6 +176,10 @@ namespace BallisticPenetration
                 + " is exactly version " + actualVersion + ".");
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional collision logging must fail open for every logger implementation failure.")]
         internal static void LogAdjustment(
             string? ammoTemplateId,
             float impactSpeed,
@@ -232,6 +244,10 @@ namespace BallisticPenetration
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Transactional rollback must continue disabling remaining patch owners after any cleanup failure.")]
         private static void DisableForRollback(SPT.Reflection.Patching.ModulePatch? patch)
         {
             if (patch == null || patch.TargetMethod == null)

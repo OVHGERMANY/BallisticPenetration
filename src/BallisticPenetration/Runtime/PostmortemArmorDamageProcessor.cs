@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using EFT;
 using EFT.Ballistics;
@@ -25,6 +26,10 @@ namespace BallisticPenetration.Runtime
 
         private static int _failureLogged;
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional postmortem durability processing must fail open for every EFT inventory failure.")]
         internal static void TryApply(
             BodyPartCollider collider,
             EArmorPlateCollider armorPlateCollider,
@@ -155,6 +160,10 @@ namespace BallisticPenetration.Runtime
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional logging must never change an armor-hit result.")]
         private static void LogAppliedArmorDamage(
             ArmorComponent armor,
             BodyPartCollider collider,

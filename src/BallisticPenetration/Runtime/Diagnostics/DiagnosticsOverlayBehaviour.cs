@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -29,6 +30,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
         private long _lastVisualizedSequence = -1L;
         private float _traceExpiresAt;
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "An optional diagnostic renderer must contain arbitrary Unity rendering failures.")]
         private void Update()
         {
             try
@@ -76,6 +81,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "An optional reflected IMGUI overlay must never break Unity's GUI event loop.")]
         private void OnGUI()
         {
             if (!isActiveAndEnabled)
@@ -192,6 +201,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             _traceExpiresAt = now + configuration.TraceLifetimeSeconds.Value;
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional line-pool allocation must clean up and fail closed for every Unity failure.")]
         private bool EnsureLinePool(Material material)
         {
             try
@@ -221,6 +234,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Partial Unity object construction must be cleaned up for every engine failure.")]
         private LineRenderer? CreatePooledLine(string suffix, Material material)
         {
             GameObject? lineObject = null;
@@ -414,6 +431,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Reflected optional GUI calls must never escape into the game render loop.")]
         private static void TryDrawOverlay(string text)
         {
             try
@@ -437,6 +458,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Runtime GUI assembly discovery must tolerate all reflection and loader failures.")]
         private static bool TryGetGuiMethods(out MethodInfo? box, out MethodInfo? label)
         {
             box = _guiBox;

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using EFT.Ballistics;
 using HarmonyLib;
@@ -33,6 +34,10 @@ namespace BallisticPenetration.Runtime.Patches
 
         [PatchPrefix]
         [HarmonyPriority(Priority.Last)]
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "The Harmony prefix must preserve vanilla values for every host or compatibility failure.")]
         private static void Prefix(Shot __instance)
         {
             CollisionContext? context = null;
