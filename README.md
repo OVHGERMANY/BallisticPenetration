@@ -101,10 +101,21 @@ capability. It never rerolls the host penetration, ricochet, deviation, fragment
 stop decision.
 
 Every response must close projectile mass and translational energy. A continuing intact or
-deformed component keeps its physical identity and immutable prior collision records. A
-confirmed fragmentation response reserves explicit projectile mass and energy for the next
-fragment-construction stage rather than creating placeholder children or copying whole-round
-geometry into them.
+deformed component keeps its physical identity and immutable prior collision records. A confirmed
+fragmentation response partitions its reserved projectile mass and energy into a retained primary
+component and deterministic projectile fragments. Target-generated spall is constructed separately
+from target mass and penetration-work energy, so it is never counted as projectile mass. Every
+output has independent geometry, projected area, drag, direction, velocity, momentum, energy,
+physical capability, source, lineage, history, and render state. A host-reported zero fragment
+count remains observable and produces the minimum one physical projectile component needed to
+close a nonzero fragmentation reservation.
+
+The development tree also contains the checked boundary for individual flight. A pure projector
+converts each physical component into EFT mass, equivalent diameter, velocity, relative G1 drag,
+damage, and penetration while preserving an explicitly supplied EFT target/armor transfer
+multiplier. A separate flight reconciler accepts EFT's measured position and velocity at the next
+collision and advances energy-based physical capability without replacing EFT's trajectory
+integrator.
 
 Only synthetic test profiles are present today. No construction or target profile is yet
 mapped to live ammunition, armor, bodies, or world materials, and target density is reserved
@@ -112,11 +123,12 @@ for the later spall calculation. Physical thickness is recorded separately from 
 effective material path; thickness alone does not secretly alter work unless the measured
 path changes.
 
-The physical-state and deformation core is not attached to EFT shots and therefore does not
-change live gameplay in version `1.2.0`. The next stage constructs individually conserved
-projectile fragments and target spall from the reserved budgets. Runtime integration follows
-only after those components have their own geometry, mass, velocity, energy, drag, lineage,
-and fail-open validation.
+The physical-state, deformation, fragmentation, projection, and flight core is not attached to EFT
+shots and therefore does not change live gameplay in version `1.2.0`. Assembly metadata and managed
+IL verify the intended integration seam: an outer `Shot.CreateFragments` postfix runs after EFT
+constructs its one real child list but before `BallisticsCalculator.UpdateShots` schedules those
+children. Runtime state binding, collider-path measurement, transactional child replacement, and
+trajectory reinitialization remain the next stage.
 
 ## Configuration
 
@@ -167,8 +179,10 @@ dotnet run --project .\tests\BallisticPenetration.Validation\BallisticPenetratio
 The validation suite checks postmortem armor guards and layer traversal; physical state,
 collision history, SI-derived values, immutable state-revision lineage, fail-open rejection,
 projectile/spall separation, mass and energy conservation, deterministic random output,
-material-profile validation, deformation and obliquity response, stopped-energy closure, and
-fragment-budget reservation; the SNB regression rows; weapon-independence at a fixed impact
+material-profile validation, deformation and obliquity response, stopped-energy closure,
+component-specific fragmentation and target-spall construction, physical-to-EFT projection,
+measured-flight reconciliation, and fragment-budget closure; the SNB regression rows;
+weapon-independence at a fixed impact
 speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
 5.45x39 US; all current local ballistic item templates; and exact acceptance of
 `com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part versions.

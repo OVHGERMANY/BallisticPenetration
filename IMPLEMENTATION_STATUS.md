@@ -1,6 +1,6 @@
 # BallisticPenetration implementation status
 
-Snapshot date: 2026-08-12
+Snapshot date: 2026-08-13
 
 ## Current live release
 
@@ -31,6 +31,40 @@ Snapshot date: 2026-08-12
 - Fixed seed and stream use the stable PCG-XSH-RR sequence
 - Invalid state returns a typed failure and no physical object; the caller can leave EFT
   state untouched
+
+## Conserved fragmentation and target spall
+
+- Pure solver: `PhysicalFragmentationSolver.TrySolve`
+- It runs only after a host-confirmed fragmentation outcome and consumes the observed host
+  fragment count without invoking EFT decision or random methods
+- Reserved projectile mass and energy are deterministically partitioned into component-specific
+  projectile fragments; a zero host count remains recorded and still produces the one minimum
+  physical fragment required to close nonzero reservations
+- Retained primary projectile mass, projectile fragments, and target-generated spall remain
+  separate outputs with distinct mass, energy, material origin, shape, drag, direction, lineage,
+  and history
+- Target-spall kinetic energy is reclassified from penetration work rather than added to the
+  collision energy budget
+- Every child receives its own mass, equivalent diameter, projected area, length, aspect ratio,
+  drag, velocity, momentum, energy, penetration capability, damage capability, orientation,
+  fragment index, generation, source collision, and render state
+- Mass and energy closure is revalidated after component construction
+
+## Individual-flight integration boundary
+
+- Pure projector: `PhysicalEftProjectileProjector.TryProject`
+- A component maps to EFT mass in grams, equivalent diameter in millimetres, speed, direction,
+  relative G1 coefficient, damage, and penetration without inheriting whole-projectile mass,
+  diameter, or drag
+- Projection preserves an explicitly measured EFT target/armor transfer multiplier while
+  replacing EFT's placeholder fragment share with the physical capability share
+- Pure flight reconciler: `PhysicalProjectileFlightState.TryAdvance`
+- EFT remains the flight integrator; measured position and velocity advance immutable physical
+  state and energy-based capability before the next material interaction
+- The runtime seam is verified: `Shot.CreateFragments` finishes child construction before
+  `BallisticsCalculator.UpdateShots` schedules `Shot.Fragments`, so an outer postfix can validate,
+  rewrite, and reinitialize children before their first tick
+- These layers are not connected to live shots yet; no gameplay behavior changed in this baseline
 
 ## Deformation and material response
 
@@ -64,16 +98,18 @@ Snapshot date: 2026-08-12
 
 - Checked Release build with latest recommended analyzers and warnings as errors: zero
   warnings, zero errors
-- Validation groups: 22 passed, zero failed, including 4,096 deterministic deformation
-  property cases across speed, impact angle, material path, target resistance, fracture
-  coupling, and every supported host outcome
+- Validation groups: 30 passed, zero failed, including 4,096 deterministic deformation cases,
+  4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
+  reconciliation, fail-open rejection, and the complete installed-ammunition sweep
 - Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
   nine fractions for 1,872 successful calculations and two expected abstract fallbacks
 - No deployment was performed for this development baseline
 
 ## Next dependency
 
-Implement deterministic projectile-fragment and target-spall construction from the reserved
-mass and energy budgets. Every child must receive component-specific geometry, cross-section,
-mass, velocity, energy, drag, orientation, lineage, and collision history before individual
-flight, runtime replacement, or rendering is enabled.
+Connect the verified physical state, deformation, fragmentation, projection, and flight layers to
+EFT shots through the existing `CreateFragments` target. Runtime integration must keep a pool-safe
+shot-to-state binding, measure a real collider material path, preserve EFT's already-selected
+outcome and armor CF, reinitialize every rewritten child trajectory, create any conserved retained
+primary or target-spall components before scheduling, and leave the original child list untouched
+when any validation step fails.

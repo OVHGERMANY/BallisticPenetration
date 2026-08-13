@@ -76,6 +76,9 @@ namespace BallisticPenetration.Validation
             Run("Deformation solver deterministic property sweep", ValidatePhysicalDeformationStressSweep);
             Run("Physical fragmentation profile validation", ValidatePhysicalFragmentationProfile);
             Run("Conserved deterministic projectile fragmentation and target spall", ValidatePhysicalFragmentationResponse);
+            Run("Physical fragments project to independent EFT shot values", ValidatePhysicalEftProjection);
+            Run("Physical-to-EFT projection fails open", ValidatePhysicalEftProjectionFallback);
+            Run("Physical fragment flight advances from measured EFT motion", ValidatePhysicalFlightState);
             Run("Zero host fragment count closes physical reservations", ValidatePhysicalFragmentationMinimumOutput);
             Run("Fragmentation solver fail-open behavior", ValidatePhysicalFragmentationFallback);
             Run("Fragmentation solver deterministic property sweep", ValidatePhysicalFragmentationStressSweep);
@@ -1910,6 +1913,234 @@ namespace BallisticPenetration.Validation
             AssertEqual("no-spall profile emits no target components", 0, noSpallResponse.TargetSpall.Count);
             AssertNear("no-spall profile target mass", 0d, noSpallResponse.TargetSpallMassKilograms);
             AssertNear("no-spall profile target energy", 0d, noSpallResponse.TargetSpallEnergyJoules);
+        }
+
+        private static void ValidatePhysicalEftProjection()
+        {
+            PhysicalProjectileState parent;
+            PhysicalProjectileMaterialProfile projectileProfile;
+            PhysicalTargetMaterialProfile targetProfile;
+            PhysicalDeformationResponse deformation;
+            CreateFragmentationScenario(
+                1000d,
+                "collision-eft-projection",
+                out parent,
+                out projectileProfile,
+                out targetProfile,
+                out deformation);
+            PhysicalFragmentationResponse response = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    CreateTestFragmentationProfile(),
+                    4,
+                    "eft-projectile-fragment",
+                    "eft-target-spall"));
+            PhysicalProjectileState fragment = response.ProjectileFragments[0];
+            var input = new PhysicalEftProjectionInput
+            {
+                Parent = parent,
+                Component = fragment,
+                ParentEftBallisticCoefficient = 0.42d,
+                ParentEftDamage = 80d,
+                ParentEftPenetrationPower = 55d,
+                DamageTransferMultiplier = 0.65d,
+                PenetrationTransferMultiplier = 0.55d
+            };
+            PhysicalEftProjectileProjection? projection;
+            PhysicalEftProjectionFailureReason reason;
+            AssertTrue(
+                "valid physical fragment projection accepted",
+                PhysicalEftProjectileProjector.TryProject(input, out projection, out reason));
+            AssertEqual(
+                "valid physical fragment projection reason",
+                PhysicalEftProjectionFailureReason.None,
+                reason);
+            PhysicalEftProjectileProjection value = RequireValue(
+                "physical fragment projection",
+                projection);
+            AssertNear(
+                "fragment mass projected in grams",
+                fragment.RetainedMassKilograms * 1000d,
+                value.MassGrams);
+            AssertNear(
+                "fragment equivalent diameter projected in millimetres",
+                fragment.EquivalentDiameterMetres * 1000d,
+                value.EquivalentDiameterMillimetres);
+            AssertNear(
+                "fragment speed projected",
+                fragment.SpeedMetresPerSecond,
+                value.SpeedMetresPerSecond);
+            AssertNear(
+                "fragment EFT drag projected by physical sectional ratio",
+                input.ParentEftBallisticCoefficient
+                    * fragment.BallisticCoefficientKilogramsPerSquareMetre
+                    / parent.BallisticCoefficientKilogramsPerSquareMetre,
+                value.BallisticCoefficient);
+            AssertNear(
+                "fragment damage capability ratio",
+                fragment.DamageCapabilityJoules / parent.DamageCapabilityJoules,
+                value.DamageCapabilityRatio);
+            AssertNear(
+                "fragment penetration capability ratio",
+                fragment.PenetrationCapabilityJoulesPerSquareMetre
+                    / parent.PenetrationCapabilityJoulesPerSquareMetre,
+                value.PenetrationCapabilityRatio);
+            AssertNear(
+                "host damage transfer remains applied after physical share",
+                input.ParentEftDamage
+                    * value.DamageCapabilityRatio
+                    * input.DamageTransferMultiplier,
+                value.Damage);
+            AssertNear(
+                "host penetration transfer remains applied after physical share",
+                input.ParentEftPenetrationPower
+                    * value.PenetrationCapabilityRatio
+                    * input.PenetrationTransferMultiplier,
+                value.PenetrationPower);
+            PhysicalVector3 expectedDirection = RequireNormalized(
+                "projected fragment direction",
+                fragment.VelocityMetresPerSecond);
+            AssertEqual("projected direction follows physical velocity", expectedDirection, value.Direction);
+            AssertTrue(
+                "projected fragment does not retain whole-projectile mass",
+                !value.MassGrams.Equals(parent.RetainedMassKilograms * 1000d));
+            AssertTrue(
+                "projected fragment does not retain whole-projectile diameter",
+                !value.EquivalentDiameterMillimetres.Equals(parent.EquivalentDiameterMetres * 1000d));
+        }
+
+        private static void ValidatePhysicalEftProjectionFallback()
+        {
+            PhysicalProjectileState parent;
+            PhysicalProjectileMaterialProfile projectileProfile;
+            PhysicalTargetMaterialProfile targetProfile;
+            PhysicalDeformationResponse deformation;
+            CreateFragmentationScenario(
+                900d,
+                "collision-eft-projection-fallback",
+                out parent,
+                out projectileProfile,
+                out targetProfile,
+                out deformation);
+            PhysicalFragmentationResponse response = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    CreateTestFragmentationProfile(),
+                    2,
+                    "fallback-eft-fragment",
+                    "fallback-eft-spall"));
+            PhysicalProjectileState fragment = response.ProjectileFragments[0];
+            var input = new PhysicalEftProjectionInput
+            {
+                Parent = parent,
+                Component = fragment,
+                ParentEftBallisticCoefficient = 0.4d,
+                ParentEftDamage = 60d,
+                ParentEftPenetrationPower = 40d
+            };
+            AssertPhysicalEftProjectionFailure(
+                "missing projection input",
+                null,
+                PhysicalEftProjectionFailureReason.InputMissing);
+
+            input.Component = null;
+            AssertPhysicalEftProjectionFailure(
+                "missing physical component",
+                input,
+                PhysicalEftProjectionFailureReason.ComponentMissing);
+            input.Component = fragment;
+
+            input.ParentEftBallisticCoefficient = double.NaN;
+            AssertPhysicalEftProjectionFailure(
+                "nonfinite EFT ballistic coefficient",
+                input,
+                PhysicalEftProjectionFailureReason.ParentEftValuesInvalid);
+            input.ParentEftBallisticCoefficient = 0.4d;
+
+            input.DamageTransferMultiplier = -1d;
+            AssertPhysicalEftProjectionFailure(
+                "negative host transfer multiplier",
+                input,
+                PhysicalEftProjectionFailureReason.TransferMultiplierInvalid);
+            input.DamageTransferMultiplier = 1d;
+
+            PhysicalProjectileStateInput unrelatedInput = CopyPhysicalStateToInput(fragment);
+            unrelatedInput.RootShotId = "unrelated-root";
+            input.Component = CreatePhysicalStateOrThrow(unrelatedInput);
+            AssertPhysicalEftProjectionFailure(
+                "unrelated fragment lineage",
+                input,
+                PhysicalEftProjectionFailureReason.LineageMismatch);
+        }
+
+        private static void ValidatePhysicalFlightState()
+        {
+            PhysicalProjectileState initial = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(800d, 0.01d, 0.01d));
+            var input = new PhysicalFlightStateInput
+            {
+                State = initial,
+                PositionMetres = new PhysicalVector3(10d, 1d, 25d),
+                VelocityMetresPerSecond = new PhysicalVector3(10d, -4d, 599d)
+            };
+            PhysicalProjectileState? advanced;
+            PhysicalFlightStateFailureReason reason;
+            AssertTrue(
+                "valid measured flight state accepted",
+                PhysicalProjectileFlightState.TryAdvance(input, out advanced, out reason));
+            AssertEqual(
+                "valid measured flight state reason",
+                PhysicalFlightStateFailureReason.None,
+                reason);
+            PhysicalProjectileState value = RequireValue("advanced physical flight state", advanced);
+            double energyRatio = value.TranslationalKineticEnergyJoules
+                / initial.TranslationalKineticEnergyJoules;
+            AssertEqual("flight keeps projectile id", initial.ProjectileId, value.ProjectileId);
+            AssertEqual("flight keeps root id", initial.RootShotId, value.RootShotId);
+            AssertEqual("flight keeps collision history", initial.CollisionHistory.Count, value.CollisionHistory.Count);
+            AssertEqual("flight accepts measured position", input.PositionMetres, value.PositionMetres);
+            AssertEqual("flight accepts measured velocity", input.VelocityMetresPerSecond, value.VelocityMetresPerSecond);
+            AssertNear(
+                "flight scales damage capability with measured energy",
+                initial.DamageCapabilityJoules * energyRatio,
+                value.DamageCapabilityJoules);
+            AssertNear(
+                "flight scales penetration capability with measured energy",
+                initial.PenetrationCapabilityJoulesPerSquareMetre * energyRatio,
+                value.PenetrationCapabilityJoulesPerSquareMetre);
+
+            input.VelocityMetresPerSecond = PhysicalVector3.Zero;
+            PhysicalProjectileState? rejected;
+            AssertTrue(
+                "zero measured velocity fails open",
+                !PhysicalProjectileFlightState.TryAdvance(input, out rejected, out reason));
+            AssertTrue("zero measured velocity returns no state", rejected == null);
+            AssertEqual(
+                "zero measured velocity reason",
+                PhysicalFlightStateFailureReason.VelocityInvalid,
+                reason);
+        }
+
+        private static void AssertPhysicalEftProjectionFailure(
+            string name,
+            PhysicalEftProjectionInput? input,
+            PhysicalEftProjectionFailureReason expectedReason)
+        {
+            PhysicalEftProjectileProjection? projection;
+            PhysicalEftProjectionFailureReason actualReason;
+            bool success = PhysicalEftProjectileProjector.TryProject(
+                input,
+                out projection,
+                out actualReason);
+            AssertTrue(name + " fails open", !success);
+            AssertTrue(name + " returns no projection", projection == null);
+            AssertEqual(name + " reason", expectedReason, actualReason);
         }
 
         private static void ValidatePhysicalFragmentationFallback()
