@@ -7,6 +7,7 @@ using System.Globalization;
 using BallisticPenetration.Core;
 using BallisticPenetration.Core.Physics;
 using BallisticPenetration.Runtime.State;
+using BallisticPenetration.Runtime.Rendering;
 using EFT.Ballistics;
 using EFT.InventoryLogic;
 using UnityEngine;
@@ -217,15 +218,6 @@ namespace BallisticPenetration.Runtime
                     return false;
                 }
 
-                PhysicalOrientation outgoingOrientation = collisionState.ParentState.Orientation;
-                if (outcome != PhysicalCollisionOutcome.Stopped
-                    && !PhysicalOrientation.TryFromForward(
-                        outgoingDirection,
-                        out outgoingOrientation))
-                {
-                    return false;
-                }
-
                 string collisionId = CreateCollisionId(collisionState.ParentState, shot);
                 var deformationInput = new PhysicalDeformationInput
                 {
@@ -239,8 +231,7 @@ namespace BallisticPenetration.Runtime
                     PhysicalThicknessMetres = collisionState.Geometry.PhysicalThicknessMetres,
                     EffectivePathLengthMetres = collisionState.Geometry.EffectivePathLengthMetres,
                     ObservedOutcome = outcome,
-                    ObservedOutgoingDirection = outgoingDirection,
-                    OutgoingOrientation = outgoingOrientation
+                    ObservedOutgoingDirection = outgoingDirection
                 };
                 if (!PhysicalDeformationSolver.TrySolve(
                         deformationInput,
@@ -259,12 +250,16 @@ namespace BallisticPenetration.Runtime
                         return false;
                     }
 
-                    PhysicalShotBindingStore.Set(
-                        shot,
-                        stoppedState,
-                        collisionState.ParentEftDamage,
-                        collisionState.ParentEftPenetrationPower,
-                        collisionState.ParentEftBallisticCoefficient);
+                    if (collisionState.SourceBinding != null)
+                    {
+                        PhysicalShotBindingStore.RemoveIfSame(
+                            shot,
+                            collisionState.SourceBinding);
+                        PhysicalProjectileVisualRuntime.Retire(
+                            collisionState.SourceBinding);
+                    }
+
+                    PhysicalProjectileVisualRuntime.RegisterEmbedded(stoppedState);
                     return true;
                 }
 
@@ -363,6 +358,15 @@ namespace BallisticPenetration.Runtime
                     PhysicalShotBindingStore.RemoveIfSame(
                         shot,
                         collisionState.SourceBinding);
+                    PhysicalProjectileVisualRuntime.Retire(
+                        collisionState.SourceBinding);
+                }
+
+                for (int index = 0; index < replacements.Count; index++)
+                {
+                    PhysicalProjectileVisualRuntime.RegisterLive(
+                        replacements[index],
+                        replacementBindings[index]);
                 }
 
                 ReleaseShotsBestEffort(originalChildren);

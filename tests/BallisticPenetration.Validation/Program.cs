@@ -68,6 +68,9 @@ namespace BallisticPenetration.Validation
             Run("Physical collision history invariants", ValidatePhysicalCollisionHistory);
             Run("Physical projectile state and derived SI values", ValidatePhysicalProjectileState);
             Run("Physical projectile invalid-state fallback", ValidatePhysicalProjectileInvalidFallback);
+            Run("Physical component render geometry", ValidatePhysicalVisualGeometry);
+            Run("Physical renderer ownership and culling policy", ValidatePhysicalVisualLifecycle);
+            Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
@@ -397,6 +400,14 @@ namespace BallisticPenetration.Validation
             input.DragCoefficient = 0.32d;
             input.YawAngleRadians = 0.08d;
             input.TumbleState = PhysicalProjectileTumbleState.Yawing;
+            AssertTrue(
+                "valid physical projectile attitude created",
+                PhysicalOrientation.TryApplyYaw(
+                    input.Orientation,
+                    input.YawAngleRadians,
+                    input.DeterministicSeed,
+                    out PhysicalOrientation validAttitude));
+            input.Orientation = validAttitude;
             input.DamageCapabilityJoules = 2500d;
             input.PenetrationCapabilityJoulesPerSquareMetre = 2500d / area;
             input.CollisionHistory = mutableHistory;
@@ -479,6 +490,14 @@ namespace BallisticPenetration.Validation
                 PhysicalProjectileStateFailureReason.OrientationInvalid);
 
             input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.YawAngleRadians = 0.5d;
+            input.TumbleState = PhysicalProjectileTumbleState.Yawing;
+            AssertPhysicalStateFailure(
+                "attitude yaw mismatch",
+                input,
+                PhysicalProjectileStateFailureReason.AttitudeYawMismatch);
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
             input.DamageCapabilityJoules = 5000d;
             AssertPhysicalStateFailure(
                 "damage energy exceeds available kinetic energy",
@@ -540,6 +559,442 @@ namespace BallisticPenetration.Validation
                 "collision history sequence mismatch",
                 input,
                 PhysicalProjectileStateFailureReason.CollisionSequenceMismatch);
+        }
+
+        private static void ValidatePhysicalVisualGeometry()
+        {
+            for (PhysicalProjectileShapeClass shape = PhysicalProjectileShapeClass.Spitzer;
+                 shape <= PhysicalProjectileShapeClass.TargetSpallChunk;
+                 shape++)
+            {
+                AssertTrue(
+                    "unit render mesh accepted for " + shape,
+                    PhysicalProjectileVisualGeometry.TryCreateUnitMesh(
+                        shape,
+                        out PhysicalVisualMeshDescriptor? descriptor,
+                        out PhysicalVisualGeometryFailureReason reason));
+                PhysicalVisualMeshDescriptor mesh = RequireValue(
+                    "unit render mesh " + shape,
+                    descriptor);
+                AssertEqual(
+                    "unit render mesh reason " + shape,
+                    PhysicalVisualGeometryFailureReason.None,
+                    reason);
+                AssertEqual("unit render mesh shape " + shape, shape, mesh.ShapeClass);
+                AssertTrue("unit render mesh has vertices " + shape, mesh.Vertices.Count >= 5);
+                AssertTrue(
+                    "unit render mesh has complete triangles " + shape,
+                    mesh.Triangles.Count >= 12 && mesh.Triangles.Count % 3 == 0);
+
+                double minimumZ = double.PositiveInfinity;
+                double maximumZ = double.NegativeInfinity;
+                for (int index = 0; index < mesh.Vertices.Count; index++)
+                {
+                    PhysicalVector3 vertex = mesh.Vertices[index];
+                    minimumZ = Math.Min(minimumZ, vertex.Z);
+                    maximumZ = Math.Max(maximumZ, vertex.Z);
+                    AssertTrue("unit render vertex finite " + shape + " " + index, vertex.IsFinite);
+                    AssertTrue(
+                        "unit render vertex x bounded " + shape + " " + index,
+                        Math.Abs(vertex.X) <= 0.500000000001d);
+                    AssertTrue(
+                        "unit render vertex y bounded " + shape + " " + index,
+                        Math.Abs(vertex.Y) <= 0.500000000001d);
+                    AssertTrue(
+                        "unit render vertex z bounded " + shape + " " + index,
+                        Math.Abs(vertex.Z) <= 0.500000000001d);
+                }
+
+                double maximumTransverseDistanceSquared = 0d;
+                for (int index = 0; index < mesh.Vertices.Count; index++)
+                {
+                    for (int otherIndex = index + 1;
+                         otherIndex < mesh.Vertices.Count;
+                         otherIndex++)
+                    {
+                        PhysicalVector3 vertex = mesh.Vertices[index];
+                        PhysicalVector3 other = mesh.Vertices[otherIndex];
+                        double deltaX = other.X - vertex.X;
+                        double deltaY = other.Y - vertex.Y;
+                        maximumTransverseDistanceSquared = Math.Max(
+                            maximumTransverseDistanceSquared,
+                            (deltaX * deltaX) + (deltaY * deltaY));
+                    }
+                }
+
+                AssertNear(
+                    "unit render mesh longitudinal span " + shape,
+                    1d,
+                    maximumZ - minimumZ);
+                AssertNear(
+                    "unit render mesh transverse diameter " + shape,
+                    1d,
+                    Math.Sqrt(maximumTransverseDistanceSquared));
+
+                for (int index = 0; index < mesh.Triangles.Count; index += 3)
+                {
+                    int a = mesh.Triangles[index];
+                    int b = mesh.Triangles[index + 1];
+                    int c = mesh.Triangles[index + 2];
+                    AssertTrue(
+                        "unit render triangle indices bounded " + shape + " " + index,
+                        a >= 0
+                            && b >= 0
+                            && c >= 0
+                            && a < mesh.Vertices.Count
+                            && b < mesh.Vertices.Count
+                            && c < mesh.Vertices.Count);
+                    PhysicalVector3 edgeOne = mesh.Vertices[b].Subtract(mesh.Vertices[a]);
+                    PhysicalVector3 edgeTwo = mesh.Vertices[c].Subtract(mesh.Vertices[a]);
+                    PhysicalVector3 normal = edgeOne.Cross(edgeTwo);
+                    AssertTrue(
+                        "unit render triangle nondegenerate " + shape + " " + index,
+                        normal.MagnitudeSquared > 0.000000000001d);
+                    PhysicalVector3 centroid = mesh.Vertices[a]
+                        .Add(mesh.Vertices[b])
+                        .Add(mesh.Vertices[c])
+                        .Scale(1d / 3d);
+                    AssertTrue(
+                        "unit render triangle faces outward " + shape + " " + index,
+                        normal.Dot(centroid) > 0d);
+                }
+
+                var edgeCounts = new Dictionary<(int Minimum, int Maximum), int>();
+                var edgeDirections = new Dictionary<(int Minimum, int Maximum), int>();
+                for (int index = 0; index < mesh.Triangles.Count; index += 3)
+                {
+                    int a = mesh.Triangles[index];
+                    int b = mesh.Triangles[index + 1];
+                    int c = mesh.Triangles[index + 2];
+                    AddDirectedMeshEdge(edgeCounts, edgeDirections, a, b);
+                    AddDirectedMeshEdge(edgeCounts, edgeDirections, b, c);
+                    AddDirectedMeshEdge(edgeCounts, edgeDirections, c, a);
+                }
+
+                foreach (KeyValuePair<(int Minimum, int Maximum), int> edge in edgeCounts)
+                {
+                    AssertEqual(
+                        "unit render mesh edge is two-manifold " + shape + " " + edge.Key,
+                        2,
+                        edge.Value);
+                    AssertEqual(
+                        "unit render mesh edge winding is consistent " + shape + " " + edge.Key,
+                        0,
+                        edgeDirections[edge.Key]);
+                }
+
+                AssertTrue(
+                    "unit render mesh deterministic " + shape,
+                    PhysicalProjectileVisualGeometry.TryCreateUnitMesh(
+                        shape,
+                        out PhysicalVisualMeshDescriptor? repeated,
+                        out _));
+                PhysicalVisualMeshDescriptor repeatedMesh = RequireValue(
+                    "repeated unit render mesh " + shape,
+                    repeated);
+                AssertEqual(
+                    "unit render vertex count deterministic " + shape,
+                    mesh.Vertices.Count,
+                    repeatedMesh.Vertices.Count);
+                AssertEqual(
+                    "unit render triangle count deterministic " + shape,
+                    mesh.Triangles.Count,
+                    repeatedMesh.Triangles.Count);
+                for (int index = 0; index < mesh.Vertices.Count; index++)
+                {
+                    AssertEqual(
+                        "unit render vertex deterministic " + shape + " " + index,
+                        mesh.Vertices[index],
+                        repeatedMesh.Vertices[index]);
+                }
+
+                for (int index = 0; index < mesh.Triangles.Count; index++)
+                {
+                    AssertEqual(
+                        "unit render index deterministic " + shape + " " + index,
+                        mesh.Triangles[index],
+                        repeatedMesh.Triangles[index]);
+                }
+            }
+
+            AssertTrue(
+                "unknown render shape rejected",
+                !PhysicalProjectileVisualGeometry.TryCreateUnitMesh(
+                    PhysicalProjectileShapeClass.Unknown,
+                    out _,
+                    out PhysicalVisualGeometryFailureReason unknownReason));
+            AssertEqual(
+                "unknown render shape reason",
+                PhysicalVisualGeometryFailureReason.ShapeUnsupported,
+                unknownReason);
+            AssertTrue(
+                "undersampled round mesh rejected",
+                !PhysicalProjectileVisualGeometry.TryCreateUnitMesh(
+                    PhysicalProjectileShapeClass.Spitzer,
+                    5,
+                    out _,
+                    out PhysicalVisualGeometryFailureReason segmentReason));
+            AssertEqual(
+                "undersampled round mesh reason",
+                PhysicalVisualGeometryFailureReason.SegmentCountInvalid,
+                segmentReason);
+
+            PhysicalProjectileState root = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(800d, 0.01d, 0.01d));
+            AssertTrue(
+                "exact physical render pose accepted",
+                PhysicalProjectileVisualGeometry.TryCreatePose(
+                    root,
+                    1d,
+                    0d,
+                    out PhysicalVisualPose exactPose,
+                    out PhysicalVisualGeometryFailureReason poseReason));
+            AssertEqual(
+                "exact physical render pose reason",
+                PhysicalVisualGeometryFailureReason.None,
+                poseReason);
+            AssertEqual(
+                "steel-core render material",
+                PhysicalVisualMaterialKey.SteelCore,
+                exactPose.MaterialKey);
+            AssertNear("exact render diameter x", root.DeformedDiameterMetres, exactPose.ScaleMetres.X);
+            AssertNear("exact render diameter y", root.DeformedDiameterMetres, exactPose.ScaleMetres.Y);
+            AssertNear("exact render length", root.LengthMetres, exactPose.ScaleMetres.Z);
+
+            PhysicalProjectileStateInput yawedInput = CreateValidRootInput(800d, 0.01d, 0.01d);
+            yawedInput.DeterministicSeed = 0x123456789ABCDEF0UL;
+            yawedInput.YawAngleRadians = Math.PI / 4d;
+            yawedInput.TumbleState = PhysicalProjectileTumbleState.Yawing;
+            AssertTrue(
+                "yawed physical attitude created",
+                PhysicalOrientation.TryApplyYaw(
+                    yawedInput.Orientation,
+                    yawedInput.YawAngleRadians,
+                    yawedInput.DeterministicSeed,
+                    out PhysicalOrientation yawedOrientation));
+            yawedInput.Orientation = yawedOrientation;
+            PhysicalProjectileState yawed = CreatePhysicalStateOrThrow(yawedInput);
+            AssertTrue(
+                "yawed physical render pose accepted",
+                PhysicalProjectileVisualGeometry.TryCreatePose(
+                    yawed,
+                    1d,
+                    0d,
+                    out PhysicalVisualPose yawedPose,
+                    out _));
+            AssertTrue("yawed render orientation remains unit", yawedPose.Orientation.IsUnit);
+            double forwardZ = 1d
+                - (2d * yawedPose.Orientation.X * yawedPose.Orientation.X)
+                - (2d * yawedPose.Orientation.Y * yawedPose.Orientation.Y);
+            AssertTrue(
+                "yawed render orientation matches physical yaw",
+                Math.Abs(Math.Cos(yawed.YawAngleRadians) - forwardZ) <= 0.000000001d);
+            AssertTrue(
+                "yawed render orientation deterministic",
+                PhysicalProjectileVisualGeometry.TryCreatePose(
+                    yawed,
+                    1d,
+                    0d,
+                    out PhysicalVisualPose repeatedYawedPose,
+                    out _));
+            AssertEqual(
+                "yawed render orientation repeats exactly",
+                yawedPose.Orientation,
+                repeatedYawedPose.Orientation);
+            AssertTrue(
+                "nonunit render base orientation rejected",
+                !PhysicalOrientation.TryApplyYaw(
+                    new PhysicalOrientation(1d, 1d, 1d, 1d),
+                    yawed.YawAngleRadians,
+                    yawed.DeterministicSeed,
+                    out _));
+            AssertTrue(
+                "small deterministic yaw seed one accepted",
+                PhysicalOrientation.TryApplyYaw(
+                    PhysicalOrientation.Identity,
+                    0.5d,
+                    1UL,
+                    out PhysicalOrientation firstSeedOrientation));
+            AssertTrue(
+                "small deterministic yaw seed two accepted",
+                PhysicalOrientation.TryApplyYaw(
+                    PhysicalOrientation.Identity,
+                    0.5d,
+                    2UL,
+                    out PhysicalOrientation secondSeedOrientation));
+            AssertTrue(
+                "small deterministic yaw seeds produce distinct azimuths",
+                RotateLocalForward(firstSeedOrientation).Dot(
+                    RotateLocalForward(secondSeedOrientation)) < 0.999999d);
+
+            const double minimumDiameter = 0.02d;
+            AssertTrue(
+                "minimum-diameter render pose accepted",
+                PhysicalProjectileVisualGeometry.TryCreatePose(
+                    root,
+                    1d,
+                    minimumDiameter,
+                    out PhysicalVisualPose enlargedPose,
+                    out _));
+            AssertNear("minimum render diameter applied", minimumDiameter, enlargedPose.ScaleMetres.X);
+            AssertNear(
+                "minimum render diameter preserves aspect ratio",
+                root.LengthMetres * (minimumDiameter / root.DeformedDiameterMetres),
+                enlargedPose.ScaleMetres.Z);
+
+            PhysicalProjectileState targetSpall = CreateChildState(
+                root,
+                PhysicalProjectileKind.TargetSpall,
+                "visual-spall",
+                0,
+                0.0001d,
+                250d);
+            AssertTrue(
+                "target-spall render pose accepted",
+                PhysicalProjectileVisualGeometry.TryCreatePose(
+                    targetSpall,
+                    1d,
+                    0d,
+                    out PhysicalVisualPose spallPose,
+                    out _));
+            AssertEqual(
+                "armored-steel spall render material",
+                PhysicalVisualMaterialKey.TargetMetal,
+                spallPose.MaterialKey);
+
+            AssertTrue(
+                "nonfinite render scale rejected",
+                !PhysicalProjectileVisualGeometry.TryCreatePose(
+                    root,
+                    double.NaN,
+                    0d,
+                    out _,
+                    out PhysicalVisualGeometryFailureReason invalidScaleReason));
+            AssertEqual(
+                "nonfinite render scale reason",
+                PhysicalVisualGeometryFailureReason.ScaleInvalid,
+                invalidScaleReason);
+        }
+
+        private static void ValidatePhysicalVisualLifecycle()
+        {
+            AssertTrue(
+                "valid physical visual policy accepted",
+                PhysicalVisualPolicy.TryCreate(
+                    128,
+                    512,
+                    200d,
+                    1d,
+                    0d,
+                    45d,
+                    out PhysicalVisualPolicy? policy,
+                    out PhysicalVisualPolicyFailureReason policyReason));
+            PhysicalVisualPolicy visualPolicy = RequireValue("physical visual policy", policy);
+            AssertEqual(
+                "valid physical visual policy reason",
+                PhysicalVisualPolicyFailureReason.None,
+                policyReason);
+            AssertTrue(
+                "component at culling boundary remains eligible",
+                visualPolicy.IsWithinCullingDistance(40000d));
+            AssertTrue(
+                "component beyond culling boundary is rejected",
+                !visualPolicy.IsWithinCullingDistance(40000.0001d));
+            AssertTrue(
+                "nonfinite culling distance is rejected",
+                !visualPolicy.IsWithinCullingDistance(double.NaN));
+            AssertTrue(
+                "tracked capacity cannot be below visible capacity",
+                !PhysicalVisualPolicy.TryCreate(
+                    128,
+                    127,
+                    200d,
+                    1d,
+                    0d,
+                    45d,
+                    out _,
+                    out PhysicalVisualPolicyFailureReason capacityReason));
+            AssertEqual(
+                "tracked capacity failure reason",
+                PhysicalVisualPolicyFailureReason.TrackedCapacityInvalid,
+                capacityReason);
+
+            var ledger = new PhysicalVisualOwnershipLedger(2);
+            AssertTrue("first visual lease acquired", ledger.TryAcquire(101L, out PhysicalVisualLease first));
+            AssertTrue("second visual lease acquired", ledger.TryAcquire(202L, out PhysicalVisualLease second));
+            AssertEqual("visual ledger active count full", 2, ledger.ActiveCount);
+            AssertTrue("first visual lease current", ledger.IsCurrent(first));
+            AssertTrue("second visual lease current", ledger.IsCurrent(second));
+            AssertTrue("visual ledger capacity enforced", !ledger.TryAcquire(303L, out _));
+            AssertTrue("first visual lease released", ledger.Release(first));
+            AssertTrue("released visual lease stale", !ledger.IsCurrent(first));
+            AssertTrue("released slot reused", ledger.TryAcquire(303L, out PhysicalVisualLease reused));
+            AssertEqual("reused visual slot", first.Slot, reused.Slot);
+            AssertTrue("reused visual generation changed", first.Generation != reused.Generation);
+            AssertTrue("stale release cannot evict new owner", !ledger.Release(first));
+            AssertTrue("new visual lease survives stale release", ledger.IsCurrent(reused));
+            AssertTrue("wrong owner cannot release slot", !ledger.Release(
+                new PhysicalVisualLease(reused.Slot, reused.Generation, 404L)));
+            AssertTrue("exact reused lease released", ledger.Release(reused));
+            ledger.Reset();
+            AssertEqual("visual ledger reset active count", 0, ledger.ActiveCount);
+            AssertTrue("reset invalidates previous second lease", !ledger.IsCurrent(second));
+
+            var limitedLedger = new PhysicalVisualOwnershipLedger(4);
+            AssertTrue(
+                "capacity-limited visual lease uses first slot",
+                limitedLedger.TryAcquire(501L, 1, out PhysicalVisualLease limited));
+            AssertEqual("capacity-limited visual slot", 0, limited.Slot);
+            AssertTrue(
+                "capacity-limited visual lease refuses an out-of-range free slot",
+                !limitedLedger.TryAcquire(502L, 1, out _));
+            AssertTrue("capacity-limited visual lease released", limitedLedger.Release(limited));
+            AssertTrue(
+                "expanded visual capacity reuses a valid low slot",
+                limitedLedger.TryAcquire(503L, 3, out PhysicalVisualLease expanded));
+            AssertTrue("expanded visual slot stays below limit", expanded.Slot < 3);
+        }
+
+        private static void AddDirectedMeshEdge(
+            Dictionary<(int Minimum, int Maximum), int> counts,
+            Dictionary<(int Minimum, int Maximum), int> directions,
+            int from,
+            int to)
+        {
+            var edge = from < to ? (from, to) : (to, from);
+            counts.TryGetValue(edge, out int count);
+            counts[edge] = count + 1;
+            directions.TryGetValue(edge, out int direction);
+            directions[edge] = direction + (from < to ? 1 : -1);
+        }
+
+        private static void ValidatePhysicalRendererIsolation()
+        {
+            string[] forbiddenReferencePrefixes =
+            {
+                "UnityEngine",
+                "BepInEx",
+                "0Harmony",
+                "Assembly-CSharp",
+                "spt-reflection"
+            };
+            System.Reflection.AssemblyName[] references =
+                typeof(PhysicalProjectileVisualGeometry).Assembly.GetReferencedAssemblies();
+            for (int referenceIndex = 0; referenceIndex < references.Length; referenceIndex++)
+            {
+                string referenceName = references[referenceIndex].Name ?? string.Empty;
+                for (int prefixIndex = 0;
+                     prefixIndex < forbiddenReferencePrefixes.Length;
+                     prefixIndex++)
+                {
+                    AssertTrue(
+                        "renderer core reference remains isolated from "
+                            + forbiddenReferencePrefixes[prefixIndex],
+                        !referenceName.StartsWith(
+                            forbiddenReferencePrefixes[prefixIndex],
+                            StringComparison.OrdinalIgnoreCase));
+                }
+            }
         }
 
         private static void ValidatePhysicalConservation()
@@ -881,6 +1336,13 @@ namespace BallisticPenetration.Validation
                 "primary state mass remains conserved",
                 parent.RetainedMassKilograms,
                 primaryState.RetainedMassKilograms);
+            AssertNear(
+                "deformed physical attitude reproduces yaw",
+                Math.Cos(primaryState.YawAngleRadians),
+                RotateLocalForward(primaryState.Orientation).Dot(
+                    RequireNormalized(
+                        "deformed primary velocity",
+                        primaryState.VelocityMetresPerSecond)));
             AssertEqual("collision history appended once", 1, primaryState.CollisionHistory.Count);
             AssertEqual(
                 "observed penetration outcome preserved",
@@ -2169,8 +2631,7 @@ namespace BallisticPenetration.Validation
                 PhysicalThicknessMetres = 0.0005d,
                 EffectivePathLengthMetres = 0.0005d,
                 ObservedOutcome = PhysicalCollisionOutcome.Fragmented,
-                ObservedOutgoingDirection = new PhysicalVector3(0d, 0d, 1d),
-                OutgoingOrientation = PhysicalOrientation.Identity
+                ObservedOutgoingDirection = new PhysicalVector3(0d, 0d, 1d)
             };
             PhysicalDeformationResponse secondDeformation = SolveDeformationOrThrow(
                 secondDeformationInput);
@@ -2653,6 +3114,16 @@ namespace BallisticPenetration.Validation
             AssertEqual("flight keeps collision history", initial.CollisionHistory.Count, value.CollisionHistory.Count);
             AssertEqual("flight accepts measured position", input.PositionMetres, value.PositionMetres);
             AssertEqual("flight accepts measured velocity", input.VelocityMetresPerSecond, value.VelocityMetresPerSecond);
+            AssertTrue(
+                "measured flight direction produces orientation",
+                PhysicalOrientation.TryFromForward(
+                    input.VelocityMetresPerSecond,
+                    out PhysicalOrientation expectedOrientation));
+            AssertNear(
+                "flight orientation follows measured velocity",
+                1d,
+                RotateLocalForward(expectedOrientation).Dot(
+                    RotateLocalForward(value.Orientation)));
             AssertNear(
                 "flight scales damage capability with measured energy",
                 initial.DamageCapabilityJoules * energyRatio,
@@ -2661,6 +3132,54 @@ namespace BallisticPenetration.Validation
                 "flight scales penetration capability with measured energy",
                 initial.PenetrationCapabilityJoulesPerSquareMetre * energyRatio,
                 value.PenetrationCapabilityJoulesPerSquareMetre);
+
+            PhysicalProjectileStateInput yawedInput = CreateValidRootInput(800d, 0.01d, 0.01d);
+            yawedInput.DeterministicSeed = 0x0FEDCBA987654321UL;
+            yawedInput.YawAngleRadians = 0.65d;
+            yawedInput.TumbleState = PhysicalProjectileTumbleState.Yawing;
+            AssertTrue(
+                "yawed flight attitude created",
+                PhysicalOrientation.TryApplyYaw(
+                    yawedInput.Orientation,
+                    yawedInput.YawAngleRadians,
+                    yawedInput.DeterministicSeed,
+                    out PhysicalOrientation yawedOrientation));
+            yawedInput.Orientation = yawedOrientation;
+            PhysicalProjectileState yawedInitial = CreatePhysicalStateOrThrow(yawedInput);
+            var yawedFlightInput = new PhysicalFlightStateInput
+            {
+                State = yawedInitial,
+                PositionMetres = new PhysicalVector3(2d, 3d, 4d),
+                VelocityMetresPerSecond = new PhysicalVector3(-120d, 40d, 610d)
+            };
+            AssertTrue(
+                "yawed measured flight state accepted",
+                PhysicalProjectileFlightState.TryAdvance(
+                    yawedFlightInput,
+                    out PhysicalProjectileState? yawedAdvanced,
+                    out _));
+            PhysicalProjectileState yawedValue = RequireValue(
+                "yawed advanced physical flight state",
+                yawedAdvanced);
+            PhysicalVector3 yawedBodyAxis = RotateLocalForward(yawedValue.Orientation);
+            PhysicalVector3 yawedVelocityDirection = RequireNormalized(
+                "yawed advanced velocity",
+                yawedValue.VelocityMetresPerSecond);
+            AssertNear(
+                "flight transport preserves physical yaw",
+                Math.Cos(yawedValue.YawAngleRadians),
+                yawedBodyAxis.Dot(yawedVelocityDirection));
+            AssertTrue(
+                "opposite flight transport remains valid",
+                PhysicalOrientation.TryTransport(
+                    PhysicalOrientation.Identity,
+                    new PhysicalVector3(0d, 0d, 1d),
+                    new PhysicalVector3(0d, 0d, -1d),
+                    out PhysicalOrientation reversedOrientation));
+            AssertEqual(
+                "opposite flight transport rotates local forward",
+                new PhysicalVector3(0d, 0d, -1d),
+                RotateLocalForward(reversedOrientation));
 
             input.VelocityMetresPerSecond = PhysicalVector3.Zero;
             PhysicalProjectileState? rejected;
@@ -3315,8 +3834,7 @@ namespace BallisticPenetration.Validation
                 PhysicalThicknessMetres = physicalThicknessMetres,
                 EffectivePathLengthMetres = effectivePathLengthMetres,
                 ObservedOutcome = outcome,
-                ObservedOutgoingDirection = new PhysicalVector3(0d, 0d, 1d),
-                OutgoingOrientation = PhysicalOrientation.Identity
+                ObservedOutgoingDirection = new PhysicalVector3(0d, 0d, 1d)
             };
         }
 
@@ -3513,6 +4031,17 @@ namespace BallisticPenetration.Validation
             }
 
             double energyJoules = 0.5d * massKilograms * speedMetresPerSecond * speedMetresPerSecond;
+            ulong deterministicSeed = parent.DeterministicSeed + (ulong)(fragmentIndex + 1);
+            double yawAngleRadians = isSpall ? 0.7d : 0.35d;
+            if (!PhysicalOrientation.TryApplyYaw(
+                    PhysicalOrientation.Identity,
+                    yawAngleRadians,
+                    deterministicSeed,
+                    out PhysicalOrientation orientation))
+            {
+                throw new InvalidOperationException("Could not calculate child projectile attitude.");
+            }
+
             return new PhysicalProjectileStateInput
             {
                 Kind = kind,
@@ -3525,7 +4054,7 @@ namespace BallisticPenetration.Validation
                 SourceCollisionId = "collision-fragmentation",
                 FragmentIndex = fragmentIndex,
                 FragmentGeneration = parent.FragmentGeneration + 1,
-                DeterministicSeed = parent.DeterministicSeed + (ulong)(fragmentIndex + 1),
+                DeterministicSeed = deterministicSeed,
                 Construction = isSpall
                     ? PhysicalProjectileConstruction.TargetMaterial
                     : parent.Construction,
@@ -3543,8 +4072,8 @@ namespace BallisticPenetration.Validation
                 DragCoefficient = isSpall ? 1.15d : 0.85d,
                 PositionMetres = parent.PositionMetres,
                 VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, speedMetresPerSecond),
-                Orientation = PhysicalOrientation.Identity,
-                YawAngleRadians = isSpall ? 0.7d : 0.35d,
+                Orientation = orientation,
+                YawAngleRadians = yawAngleRadians,
                 TumbleState = PhysicalProjectileTumbleState.Tumbling,
                 PenetrationCapabilityJoulesPerSquareMetre = energyJoules / area,
                 DamageCapabilityJoules = energyJoules * 0.5d,

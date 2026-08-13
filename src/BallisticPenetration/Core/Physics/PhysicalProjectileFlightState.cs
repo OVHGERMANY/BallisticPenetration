@@ -14,7 +14,8 @@ namespace BallisticPenetration.Core.Physics
         VelocityInvalid = 5,
         EnergyInvalid = 6,
         CapabilityInvalid = 7,
-        StateCreationFailed = 8
+        StateCreationFailed = 8,
+        OrientationInvalid = 9
     }
 
     public sealed class PhysicalFlightStateInput
@@ -101,6 +102,16 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
+            if (!PhysicalOrientation.TryTransport(
+                    current.Orientation,
+                    current.VelocityMetresPerSecond,
+                    input.VelocityMetresPerSecond,
+                    out PhysicalOrientation orientation))
+            {
+                failureReason = PhysicalFlightStateFailureReason.OrientationInvalid;
+                return false;
+            }
+
             var stateInput = new PhysicalProjectileStateInput
             {
                 Kind = current.Kind,
@@ -125,7 +136,7 @@ namespace BallisticPenetration.Core.Physics
                 DragCoefficient = current.DragCoefficient,
                 PositionMetres = input.PositionMetres,
                 VelocityMetresPerSecond = input.VelocityMetresPerSecond,
-                Orientation = current.Orientation,
+                Orientation = orientation,
                 YawAngleRadians = current.YawAngleRadians,
                 TumbleState = current.TumbleState,
                 PenetrationCapabilityJoulesPerSquareMetre = penetrationCapability,

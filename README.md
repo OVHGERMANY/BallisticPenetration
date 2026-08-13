@@ -143,10 +143,23 @@ mass, shape, cross-section, drag, velocity, energy, damage, penetration, lineage
 collision state. Target spall can itself deform and fragment at a later target without being
 reclassified as bullet mass.
 
-This runtime path has passed offline compiler, invariant, conservation, deterministic, and full
-ammunition-database tests. It has not completed manual in-game acceptance and remains experimental.
-No custom bullet or fragment mesh renderer is present yet; EFT simulates the projected child shots,
-but the post-impact component shapes are not yet drawn as dedicated geometry.
+The physical path now includes dedicated post-impact geometry for intact and deformed projectiles,
+projectile fragments, and target-generated spall. Eight deterministic low-poly shape classes cover
+spitzer, round-nose, flat-nose, mushroomed, flattened, irregular-fragment, spall-flake, and
+spall-chunk states. Mesh scale comes from each component's calculated diameter and length. Physical
+yaw is applied around a deterministic azimuth, while moving geometry follows the exact pooled EFT
+shot only while its binding identity remains current.
+
+Rendering is main-thread-only and uses shared meshes and materials, a generation-checked slot pool,
+nearest-first distance culling, separate visible/tracked budgets, scene cleanup, embedded-component
+expiry, and destroyed-slot recovery. Collision patches enqueue immutable commands and never create
+or mutate Unity objects. The default dimension scale is one and the default minimum visible diameter
+is zero, so calculated component size is preserved unless the user deliberately enables visual-only
+enlargement.
+
+This runtime path has passed offline compiler, analyzer, invariant, conservation, deterministic,
+renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. It has
+not completed the final integrated in-game acceptance campaign and remains experimental.
 
 ## Configuration
 
@@ -161,6 +174,13 @@ Available settings:
 - `General / Enabled` (default `true`)
 - `General / Damage Armor On Corpses` (default `true`)
 - `Experimental / Enable Physical Projectiles` (default `false`)
+- `Physical Rendering / Render Physical Components` (default `true`; requires the experimental physical path)
+- `Physical Rendering / Maximum Visible Components` (default `128`, range `8` through `512`)
+- `Physical Rendering / Maximum Tracked Components` (default `512`, range `16` through `4096`)
+- `Physical Rendering / Culling Distance Meters` (default `200`, range `10` through `2000`)
+- `Physical Rendering / Dimension Scale` (default `1`, range `0.25` through `25`)
+- `Physical Rendering / Minimum Rendered Diameter Millimeters` (default `0`, range `0` through `50`)
+- `Physical Rendering / Embedded Component Lifetime Seconds` (default `45`, range `0.25` through `600`)
 - `Falloff / Penetration Exponent` (default `1.4`, range `0.1` through `4.0`)
 - `Falloff / Damage Exponent` (default `0.4`, range `0.1` through `4.0`)
 - `Diagnostics / Log Adjustments` (default `false`)
@@ -201,7 +221,8 @@ projectile/spall separation, mass and energy conservation, deterministic random 
 material-profile validation, deformation and obliquity response, stopped-energy closure,
 component-specific fragmentation and target-spall construction, physical-to-EFT projection,
 measured-flight reconciliation, material-exit placement, continuing target-spall fragmentation,
-and fragment-budget closure; the SNB regression rows;
+fragment-budget closure, deterministic component meshes, physical yaw, visual ownership generations,
+culling boundaries, capacity limits, and renderer-core dependency isolation; the SNB regression rows;
 weapon-independence at a fixed impact
 speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
 5.45x39 US; all current local ballistic item templates; and exact acceptance of

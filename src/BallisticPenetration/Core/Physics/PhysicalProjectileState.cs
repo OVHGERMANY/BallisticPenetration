@@ -43,7 +43,8 @@ namespace BallisticPenetration.Core.Physics
         DerivedValueInvalid = 31,
         MaterialOriginMismatch = 32,
         DamageCapabilityExceedsEnergy = 33,
-        CollisionSequenceMismatch = 34
+        CollisionSequenceMismatch = 34,
+        AttitudeYawMismatch = 35
     }
 
     /// <summary>
@@ -142,6 +143,7 @@ namespace BallisticPenetration.Core.Physics
         public const int SchemaVersion = 1;
 
         private const double RestSpeedToleranceMetresPerSecond = 0.000000001d;
+        private const double AttitudeYawToleranceRadians = 0.000001d;
 
         private readonly ReadOnlyCollection<PhysicalCollisionRecord> _collisionHistory;
 
@@ -262,6 +264,11 @@ namespace BallisticPenetration.Core.Physics
 
         public double TranslationalKineticEnergyJoules { get; }
 
+        /// <summary>
+        /// Actual longitudinal body attitude in world space. YawAngleRadians is the angle between
+        /// this local positive-Z direction and the flight direction; a stopped component retains
+        /// the last incoming flight direction used to construct this attitude.
+        /// </summary>
         public PhysicalOrientation Orientation { get; }
 
         public double YawAngleRadians { get; }
@@ -467,6 +474,30 @@ namespace BallisticPenetration.Core.Physics
             {
                 failureReason = PhysicalProjectileStateFailureReason.YawAngleInvalid;
                 return false;
+            }
+
+            if (speedMetresPerSecond > RestSpeedToleranceMetresPerSecond)
+            {
+                if (!input.VelocityMetresPerSecond.TryNormalize(
+                        out PhysicalVector3 velocityDirection)
+                    || !input.Orientation.LongitudinalAxis.TryNormalize(
+                        out PhysicalVector3 longitudinalAxis))
+                {
+                    failureReason = PhysicalProjectileStateFailureReason.OrientationInvalid;
+                    return false;
+                }
+
+                double attitudeDot = Math.Max(
+                    -1d,
+                    Math.Min(1d, longitudinalAxis.Dot(velocityDirection)));
+                double measuredYaw = Math.Acos(attitudeDot);
+                if (!FiniteDouble.IsFinite(measuredYaw)
+                    || Math.Abs(measuredYaw - input.YawAngleRadians)
+                        > AttitudeYawToleranceRadians)
+                {
+                    failureReason = PhysicalProjectileStateFailureReason.AttitudeYawMismatch;
+                    return false;
+                }
             }
 
             if (input.TumbleState < PhysicalProjectileTumbleState.Stable

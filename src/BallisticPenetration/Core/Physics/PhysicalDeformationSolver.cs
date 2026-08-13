@@ -24,26 +24,20 @@ namespace BallisticPenetration.Core.Physics
         EffectivePathLengthInvalid = 13,
         OutcomeInvalid = 14,
         OutgoingDirectionInvalid = 15,
-        OutgoingOrientationInvalid = 16,
-        DuplicateCollisionId = 17,
-        WorkCalculationInvalid = 18,
-        EnergyDemandInvalid = 19,
-        MovingOutcomeHasNoResidualEnergy = 20,
-        FragmentationUnsupportedByProfile = 21,
-        GeometryInvalid = 22,
-        LossBudgetInvalid = 23,
-        CollisionRecordInvalid = 24,
-        PrimaryStateInvalid = 25,
-        ConservationValidationFailed = 26
+        DuplicateCollisionId = 16,
+        WorkCalculationInvalid = 17,
+        EnergyDemandInvalid = 18,
+        MovingOutcomeHasNoResidualEnergy = 19,
+        FragmentationUnsupportedByProfile = 20,
+        GeometryInvalid = 21,
+        LossBudgetInvalid = 22,
+        CollisionRecordInvalid = 23,
+        PrimaryStateInvalid = 24,
+        ConservationValidationFailed = 25
     }
 
     public sealed class PhysicalDeformationInput
     {
-        public PhysicalDeformationInput()
-        {
-            OutgoingOrientation = PhysicalOrientation.Identity;
-        }
-
         public PhysicalProjectileState? Parent { get; set; }
 
         public PhysicalProjectileMaterialProfile? ProjectileProfile { get; set; }
@@ -80,8 +74,6 @@ namespace BallisticPenetration.Core.Physics
         /// Host-selected outgoing direction for a continuing outcome. It is normalized by the solver.
         /// </summary>
         public PhysicalVector3 ObservedOutgoingDirection { get; set; }
-
-        public PhysicalOrientation OutgoingOrientation { get; set; }
     }
 
     /// <summary>
@@ -288,12 +280,6 @@ namespace BallisticPenetration.Core.Physics
                 || input.ObservedOutcome > PhysicalCollisionOutcome.Fragmented)
             {
                 failureReason = PhysicalDeformationFailureReason.OutcomeInvalid;
-                return false;
-            }
-
-            if (!input.OutgoingOrientation.IsUnit)
-            {
-                failureReason = PhysicalDeformationFailureReason.OutgoingOrientationInvalid;
                 return false;
             }
 
@@ -669,6 +655,26 @@ namespace BallisticPenetration.Core.Physics
                 parent.YawAngleRadians + addedYawRadians,
                 0d,
                 Math.PI);
+            PhysicalVector3 attitudeDirection = input.ObservedOutcome
+                == PhysicalCollisionOutcome.Stopped
+                ? parent.VelocityMetresPerSecond
+                : outgoingDirection;
+            if (!PhysicalOrientation.TryFromForward(
+                    attitudeDirection,
+                    out PhysicalOrientation attitudeBase))
+            {
+                return false;
+            }
+
+            if (!PhysicalOrientation.TryApplyYaw(
+                    attitudeBase,
+                    yawAngleRadians,
+                    parent.DeterministicSeed,
+                    out PhysicalOrientation outputOrientation))
+            {
+                return false;
+            }
+
             double frontalAreaSquareMetres;
             if (!PhysicalProjectileGeometry.TryCalculateCircularAreaSquareMetres(
                 deformedDiameterMetres,
@@ -765,7 +771,7 @@ namespace BallisticPenetration.Core.Physics
                 DragCoefficient = dragCoefficient,
                 PositionMetres = outputPositionMetres,
                 VelocityMetresPerSecond = velocity,
-                Orientation = input.OutgoingOrientation,
+                Orientation = outputOrientation,
                 YawAngleRadians = yawAngleRadians,
                 TumbleState = tumbleState,
                 PenetrationCapabilityJoulesPerSquareMetre = penetrationCapability,

@@ -275,6 +275,17 @@ namespace BallisticPenetration.Core.Physics
             get { return IsFinite && Math.Abs(MagnitudeSquared - 1d) <= UnitTolerance; }
         }
 
+        public PhysicalVector3 LongitudinalAxis
+        {
+            get
+            {
+                return new PhysicalVector3(
+                    2d * ((X * Z) + (W * Y)),
+                    2d * ((Y * Z) - (W * X)),
+                    1d - (2d * ((X * X) + (Y * Y))));
+            }
+        }
+
         public bool Equals(PhysicalOrientation other)
         {
             return X.Equals(other.X)
@@ -360,6 +371,162 @@ namespace BallisticPenetration.Core.Physics
 
             orientation = candidate;
             return true;
+        }
+
+        /// <summary>
+        /// Applies a deterministic yaw in the local frame of a unit base orientation. This produces
+        /// the component's actual longitudinal attitude; the supplied base local Z normally follows
+        /// its velocity.
+        /// </summary>
+        public static bool TryApplyYaw(
+            PhysicalOrientation baseOrientation,
+            double yawAngleRadians,
+            ulong deterministicSeed,
+            out PhysicalOrientation orientation)
+        {
+            orientation = Identity;
+            if (!baseOrientation.IsUnit
+                || !FiniteDouble.IsFinite(yawAngleRadians)
+                || yawAngleRadians < 0d
+                || yawAngleRadians > Math.PI)
+            {
+                return false;
+            }
+
+            if (yawAngleRadians <= 0d)
+            {
+                orientation = baseOrientation;
+                return true;
+            }
+
+            const double TwoToThePowerOf53 = 9007199254740992d;
+            ulong azimuthBits = MixSeed(deterministicSeed) >> 11;
+            double azimuth = (azimuthBits / TwoToThePowerOf53) * (2d * Math.PI);
+            double sine = Math.Sin(yawAngleRadians);
+            var localLongitudinalAxis = new PhysicalVector3(
+                sine * Math.Cos(azimuth),
+                sine * Math.Sin(azimuth),
+                Math.Cos(yawAngleRadians));
+            if (!TryFromForward(localLongitudinalAxis, out PhysicalOrientation localYaw))
+            {
+                return false;
+            }
+
+            return TryMultiply(baseOrientation, localYaw, out orientation);
+        }
+
+        /// <summary>
+        /// Carries an actual component attitude through the shortest rotation between two measured
+        /// flight directions. The relative yaw and roll are retained while EFT advances the shot.
+        /// </summary>
+        public static bool TryTransport(
+            PhysicalOrientation currentOrientation,
+            PhysicalVector3 previousForward,
+            PhysicalVector3 measuredForward,
+            out PhysicalOrientation orientation)
+        {
+            orientation = Identity;
+            if (!currentOrientation.IsUnit
+                || !previousForward.TryNormalize(out PhysicalVector3 previousUnit)
+                || !measuredForward.TryNormalize(out PhysicalVector3 measuredUnit))
+            {
+                return false;
+            }
+
+            double dot = Math.Max(-1d, Math.Min(1d, previousUnit.Dot(measuredUnit)));
+            PhysicalOrientation delta;
+            if (dot >= 0.999999999d)
+            {
+                delta = Identity;
+            }
+            else if (dot <= -0.999999999d)
+            {
+                PhysicalVector3 axis = previousUnit.Cross(new PhysicalVector3(1d, 0d, 0d));
+                if (!axis.TryNormalize(out PhysicalVector3 normalizedAxis))
+                {
+                    axis = previousUnit.Cross(new PhysicalVector3(0d, 1d, 0d));
+                    if (!axis.TryNormalize(out normalizedAxis))
+                    {
+                        return false;
+                    }
+                }
+
+                delta = new PhysicalOrientation(
+                    normalizedAxis.X,
+                    normalizedAxis.Y,
+                    normalizedAxis.Z,
+                    0d);
+            }
+            else
+            {
+                PhysicalVector3 axis = previousUnit.Cross(measuredUnit);
+                var candidate = new PhysicalOrientation(axis.X, axis.Y, axis.Z, 1d + dot);
+                if (!TryNormalize(candidate, out delta))
+                {
+                    return false;
+                }
+            }
+
+            return TryMultiply(delta, currentOrientation, out orientation);
+        }
+
+        private static bool TryMultiply(
+            PhysicalOrientation left,
+            PhysicalOrientation right,
+            out PhysicalOrientation result)
+        {
+            var candidate = new PhysicalOrientation(
+                (left.W * right.X)
+                    + (left.X * right.W)
+                    + (left.Y * right.Z)
+                    - (left.Z * right.Y),
+                (left.W * right.Y)
+                    - (left.X * right.Z)
+                    + (left.Y * right.W)
+                    + (left.Z * right.X),
+                (left.W * right.Z)
+                    + (left.X * right.Y)
+                    - (left.Y * right.X)
+                    + (left.Z * right.W),
+                (left.W * right.W)
+                    - (left.X * right.X)
+                    - (left.Y * right.Y)
+                    - (left.Z * right.Z));
+            return TryNormalize(candidate, out result);
+        }
+
+        private static bool TryNormalize(
+            PhysicalOrientation candidate,
+            out PhysicalOrientation orientation)
+        {
+            orientation = Identity;
+            double magnitudeSquared = candidate.MagnitudeSquared;
+            if (!FiniteDouble.IsFinite(magnitudeSquared) || magnitudeSquared <= 0d)
+            {
+                return false;
+            }
+
+            double inverseMagnitude = 1d / Math.Sqrt(magnitudeSquared);
+            var normalized = new PhysicalOrientation(
+                candidate.X * inverseMagnitude,
+                candidate.Y * inverseMagnitude,
+                candidate.Z * inverseMagnitude,
+                candidate.W * inverseMagnitude);
+            if (!normalized.IsUnit)
+            {
+                return false;
+            }
+
+            orientation = normalized;
+            return true;
+        }
+
+        private static ulong MixSeed(ulong value)
+        {
+            ulong mixed = unchecked(value + 0x9E3779B97F4A7C15UL);
+            mixed = unchecked((mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9UL);
+            mixed = unchecked((mixed ^ (mixed >> 27)) * 0x94D049BB133111EBUL);
+            return mixed ^ (mixed >> 31);
         }
     }
 

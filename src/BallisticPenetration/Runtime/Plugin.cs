@@ -11,6 +11,7 @@ using BallisticPenetration.Core;
 using BallisticPenetration.Runtime;
 using BallisticPenetration.Runtime.Diagnostics;
 using BallisticPenetration.Runtime.Patches;
+using BallisticPenetration.Runtime.Rendering;
 
 namespace BallisticPenetration
 {
@@ -98,6 +99,7 @@ namespace BallisticPenetration
         private void OnDestroy()
         {
             _isShuttingDown = true;
+            PhysicalProjectileVisualRuntime.Shutdown();
             // Remove the optional overlay and trace objects.
             DiagnosticsRuntime.Shutdown();
         }
@@ -110,6 +112,7 @@ namespace BallisticPenetration
             }
 
             // Unity objects are created from this main-thread callback.
+            PhysicalProjectileVisualRuntime.UpdatePresentation();
             DiagnosticsRuntime.UpdatePresentation();
         }
 

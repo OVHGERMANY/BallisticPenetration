@@ -1,4 +1,5 @@
 using BepInEx.Configuration;
+using BallisticPenetration.Core.Physics;
 
 namespace BallisticPenetration.Runtime
 {
@@ -31,6 +32,72 @@ namespace BallisticPenetration.Runtime
                 "Enable Physical Projectiles",
                 false,
                 "Enable the unaccepted physical projectile, deformation, fragmentation, and individual-child runtime path. Keep disabled outside controlled testing.");
+
+            RenderPhysicalComponents = config.Bind(
+                "Physical Rendering",
+                "Render Physical Components",
+                true,
+                "Draw dedicated geometry for physically modeled bullets, fragments, embedded components, and target spall. This is active only when experimental physical projectiles are enabled.");
+
+            MaximumVisiblePhysicalComponents = config.Bind(
+                "Physical Rendering",
+                "Maximum Visible Components",
+                128,
+                new ConfigDescription(
+                    "Maximum number of physical component meshes visible at once. Nearest components win the budget.",
+                    new AcceptableValueRange<int>(
+                        PhysicalVisualPolicy.MinimumVisibleCapacity,
+                        PhysicalVisualPolicy.MaximumVisibleCapacity)));
+
+            MaximumTrackedPhysicalComponents = config.Bind(
+                "Physical Rendering",
+                "Maximum Tracked Components",
+                512,
+                new ConfigDescription(
+                    "Maximum live and embedded physical components retained by the visual tracker.",
+                    new AcceptableValueRange<int>(
+                        PhysicalVisualPolicy.MinimumTrackedCapacity,
+                        PhysicalVisualPolicy.MaximumTrackedCapacity)));
+
+            PhysicalComponentCullingDistanceMeters = config.Bind(
+                "Physical Rendering",
+                "Culling Distance Meters",
+                200f,
+                new ConfigDescription(
+                    "Components farther than this distance from the active camera release their pooled visual slot.",
+                    new AcceptableValueRange<float>(
+                        (float)PhysicalVisualPolicy.MinimumCullingDistanceMetres,
+                        (float)PhysicalVisualPolicy.MaximumCullingDistanceMetres)));
+
+            PhysicalComponentDimensionScale = config.Bind(
+                "Physical Rendering",
+                "Dimension Scale",
+                1f,
+                new ConfigDescription(
+                    "Uniform visual-only multiplier for component diameter and length. One preserves calculated physical size.",
+                    new AcceptableValueRange<float>(
+                        (float)PhysicalVisualPolicy.MinimumDimensionScale,
+                        (float)PhysicalVisualPolicy.MaximumDimensionScale)));
+
+            MinimumRenderedPhysicalDiameterMillimeters = config.Bind(
+                "Physical Rendering",
+                "Minimum Rendered Diameter Millimeters",
+                0f,
+                new ConfigDescription(
+                    "Visual-only minimum diameter that preserves aspect ratio when enlarging tiny fragments. Zero preserves calculated dimensions exactly.",
+                    new AcceptableValueRange<float>(
+                        0f,
+                        (float)(PhysicalVisualPolicy.MaximumMinimumDiameterMetres * 1000d))));
+
+            EmbeddedPhysicalComponentLifetimeSeconds = config.Bind(
+                "Physical Rendering",
+                "Embedded Component Lifetime Seconds",
+                45f,
+                new ConfigDescription(
+                    "How long stopped or embedded physical component geometry remains eligible for rendering.",
+                    new AcceptableValueRange<float>(
+                        (float)PhysicalVisualPolicy.MinimumEmbeddedLifetimeSeconds,
+                        (float)PhysicalVisualPolicy.MaximumEmbeddedLifetimeSeconds)));
 
             PenetrationExponent = config.Bind(
                 "Falloff",
@@ -111,6 +178,20 @@ namespace BallisticPenetration.Runtime
 
         internal ConfigEntry<bool> EnableExperimentalPhysicalProjectiles { get; private set; }
 
+        internal ConfigEntry<bool> RenderPhysicalComponents { get; private set; }
+
+        internal ConfigEntry<int> MaximumVisiblePhysicalComponents { get; private set; }
+
+        internal ConfigEntry<int> MaximumTrackedPhysicalComponents { get; private set; }
+
+        internal ConfigEntry<float> PhysicalComponentCullingDistanceMeters { get; private set; }
+
+        internal ConfigEntry<float> PhysicalComponentDimensionScale { get; private set; }
+
+        internal ConfigEntry<float> MinimumRenderedPhysicalDiameterMillimeters { get; private set; }
+
+        internal ConfigEntry<float> EmbeddedPhysicalComponentLifetimeSeconds { get; private set; }
+
         internal ConfigEntry<float> PenetrationExponent { get; private set; }
 
         internal ConfigEntry<float> DamageExponent { get; private set; }
@@ -137,6 +218,19 @@ namespace BallisticPenetration.Runtime
             damageExponent = DamageExponent.Value;
 
             return IsValidExponent(penetrationExponent) && IsValidExponent(damageExponent);
+        }
+
+        internal bool TryGetVisualPolicy(out PhysicalVisualPolicy? policy)
+        {
+            return PhysicalVisualPolicy.TryCreate(
+                MaximumVisiblePhysicalComponents.Value,
+                MaximumTrackedPhysicalComponents.Value,
+                PhysicalComponentCullingDistanceMeters.Value,
+                PhysicalComponentDimensionScale.Value,
+                MinimumRenderedPhysicalDiameterMillimeters.Value / 1000d,
+                EmbeddedPhysicalComponentLifetimeSeconds.Value,
+                out policy,
+                out _);
         }
 
         private static bool IsValidExponent(double value)
