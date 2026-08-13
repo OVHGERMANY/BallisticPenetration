@@ -202,15 +202,13 @@ namespace BallisticPenetration.Core.Physics
             Parent = parent ?? throw new ArgumentNullException(nameof(parent));
             Conservation = conservation;
 
-            if (outputs == null)
-            {
-                throw new ArgumentNullException(nameof(outputs));
-            }
+            IReadOnlyList<PhysicalProjectileState> safeOutputs = outputs
+                ?? throw new ArgumentNullException(nameof(outputs));
 
-            var copy = new PhysicalProjectileState[outputs.Count];
+            var copy = new PhysicalProjectileState[safeOutputs.Count];
             for (int index = 0; index < copy.Length; index++)
             {
-                copy[index] = outputs[index]
+                copy[index] = safeOutputs[index]
                     ?? throw new ArgumentException("Telemetry outputs cannot contain null states.", nameof(outputs));
             }
 
@@ -244,37 +242,40 @@ namespace BallisticPenetration.Core.Physics
     /// </summary>
     public static class PhysicalProjectileTelemetry
     {
+        public const int SchemaVersion = 1;
+
         private static Action<object>? _transitionPublished;
 
-        public static event Action<object> TransitionPublished
+        public static void Subscribe(Action<object> observer)
         {
-            add
+            Action<object> safeObserver = observer
+                ?? throw new ArgumentNullException(nameof(observer));
+            Action<object>? current;
+            Action<object>? updated;
+            do
             {
-                Action<object>? current;
-                Action<object>? updated;
-                do
-                {
-                    current = _transitionPublished;
-                    updated = (Action<object>?)Delegate.Combine(current, value);
-                }
-                while (!ReferenceEquals(
-                    Interlocked.CompareExchange(ref _transitionPublished, updated, current),
-                    current));
+                current = _transitionPublished;
+                updated = (Action<object>?)Delegate.Combine(current, safeObserver);
             }
+            while (!ReferenceEquals(
+                Interlocked.CompareExchange(ref _transitionPublished, updated, current),
+                current));
+        }
 
-            remove
+        public static void Unsubscribe(Action<object> observer)
+        {
+            Action<object> safeObserver = observer
+                ?? throw new ArgumentNullException(nameof(observer));
+            Action<object>? current;
+            Action<object>? updated;
+            do
             {
-                Action<object>? current;
-                Action<object>? updated;
-                do
-                {
-                    current = _transitionPublished;
-                    updated = (Action<object>?)Delegate.Remove(current, value);
-                }
-                while (!ReferenceEquals(
-                    Interlocked.CompareExchange(ref _transitionPublished, updated, current),
-                    current));
+                current = _transitionPublished;
+                updated = (Action<object>?)Delegate.Remove(current, safeObserver);
             }
+            while (!ReferenceEquals(
+                Interlocked.CompareExchange(ref _transitionPublished, updated, current),
+                current));
         }
 
         public static bool HasSubscribers
@@ -311,6 +312,8 @@ namespace BallisticPenetration.Core.Physics
 
     internal static class PhysicalProjectileTelemetryFactory
     {
+        private const double RelativeTolerance = 0.000000001d;
+
         private static readonly IReadOnlyList<PhysicalProjectileState> NoOutputs =
             Array.AsReadOnly(Array.Empty<PhysicalProjectileState>());
 
@@ -343,13 +346,24 @@ namespace BallisticPenetration.Core.Physics
         {
             telemetryEvent = null;
             if (string.IsNullOrWhiteSpace(transitionId)
+                || outcome == PhysicalCollisionOutcome.Unknown
                 || host == null
                 || impact == null
                 || parent == null
                 || outputs == null
+                || outputs.Count == 0
                 || !lossBudget.IsValid(out _)
                 || !IsFiniteNonNegative(parent.RetainedMassKilograms)
                 || !IsFiniteNonNegative(parent.TranslationalKineticEnergyJoules))
+            {
+                return false;
+            }
+
+            double energyTolerance = Math.Max(
+                1d,
+                parent.TranslationalKineticEnergyJoules) * RelativeTolerance;
+            if (lossBudget.TotalLossJoules
+                > parent.TranslationalKineticEnergyJoules + energyTolerance)
             {
                 return false;
             }
@@ -386,11 +400,16 @@ namespace BallisticPenetration.Core.Physics
             double residualEnergy = Math.Max(
                 0d,
                 parent.TranslationalKineticEnergyJoules - lossBudget.TotalLossJoules);
+            double massTolerance = Math.Max(
+                0.000000000001d,
+                parent.RetainedMassKilograms * RelativeTolerance);
             if (!AreFiniteNonNegative(
                     allocatedParentMass,
                     targetSpallMass,
                     outputEnergy,
-                    residualEnergy))
+                    residualEnergy)
+                || allocatedParentMass > parent.RetainedMassKilograms + massTolerance
+                || outputEnergy > residualEnergy + energyTolerance)
             {
                 return false;
             }

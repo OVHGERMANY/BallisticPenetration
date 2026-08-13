@@ -127,7 +127,8 @@ namespace BallisticPenetration.Runtime
                     penetrationPower,
                     binding.EftBallisticCoefficient,
                     binding,
-                    out collisionState))
+                    out collisionState)
+                || collisionState == null)
             {
                 return PhysicalBoundFlightResult.Rejected;
             }

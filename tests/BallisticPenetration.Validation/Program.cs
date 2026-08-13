@@ -71,6 +71,7 @@ namespace BallisticPenetration.Validation
             Run("Physical component render geometry", ValidatePhysicalVisualGeometry);
             Run("Physical renderer ownership and culling policy", ValidatePhysicalVisualLifecycle);
             Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
+            Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
@@ -1140,6 +1141,196 @@ namespace BallisticPenetration.Validation
                 "invalid loss budget reason",
                 PhysicalConservationFailureReason.LossBudgetInvalid,
                 reason);
+        }
+
+        private static void ValidatePhysicalTelemetry()
+        {
+            AssertEqual("physical telemetry schema", 1, PhysicalProjectileTelemetry.SchemaVersion);
+            AssertTrue("physical telemetry begins without subscribers", !PhysicalProjectileTelemetry.HasSubscribers);
+
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(800d, 0.01d, 0.0095d));
+            PhysicalProjectileState projectileOutput = CreateChildState(
+                parent,
+                PhysicalProjectileKind.ProjectileFragment,
+                "telemetry-fragment",
+                0,
+                0.006d,
+                500d);
+            PhysicalProjectileState spallOutput = CreateChildState(
+                parent,
+                PhysicalProjectileKind.TargetSpall,
+                "telemetry-spall",
+                1,
+                0.001d,
+                200d);
+            var mutableOutputs = new List<PhysicalProjectileState>
+            {
+                projectileOutput,
+                spallOutput
+            };
+            var host = new PhysicalTelemetryHostIdentity(
+                41,
+                42,
+                43,
+                44,
+                1,
+                2,
+                "profile",
+                "ammo-template",
+                "test ammunition");
+            var impact = new PhysicalTelemetryImpact(
+                new PhysicalVector3(1d, 2d, 3d),
+                new PhysicalVector3(0d, 0d, -1d),
+                0.01d,
+                0.02d,
+                "armored-steel",
+                PhysicalMaterialClass.ArmoredSteel,
+                7850d,
+                900000000d,
+                0.8d,
+                0.9d,
+                0.1d);
+            var lossBudget = new PhysicalLossBudget(2000d, 200d, 50d, 20d, 0d);
+
+            AssertTrue(
+                "resolved physical telemetry created",
+                PhysicalProjectileTelemetryFactory.TryCreateResolved(
+                    "transition-1",
+                    PhysicalCollisionOutcome.Fragmented,
+                    host,
+                    impact,
+                    parent,
+                    mutableOutputs,
+                    lossBudget,
+                    out PhysicalProjectileTelemetryEvent? resolved)
+                && resolved != null);
+            PhysicalProjectileTelemetryEvent value = RequireValue("resolved physical telemetry", resolved);
+            mutableOutputs.Clear();
+            AssertEqual("telemetry stage", PhysicalTelemetryStage.CollisionResolved, value.Stage);
+            AssertEqual("telemetry outcome", PhysicalCollisionOutcome.Fragmented, value.Outcome);
+            AssertEqual("telemetry transition id", "transition-1", value.TransitionId);
+            AssertEqual("telemetry output copy remains immutable", 2, value.Outputs.Count);
+            AssertEqual("telemetry parent retained by immutable identity", parent, value.Parent);
+            AssertEqual("telemetry root fire index", 41, value.Host.RootFireIndex);
+            AssertEqual("telemetry parent depth", 2, value.Host.ParentDepth);
+            AssertEqual("telemetry target class", PhysicalMaterialClass.ArmoredSteel, value.Impact.TargetMaterialClass);
+
+            PhysicalTelemetryConservation conservation = RequireValue(
+                "telemetry conservation",
+                value.Conservation);
+            AssertNear("telemetry parent mass", 0.0095d, conservation.ParentMassKilograms);
+            AssertNear("telemetry allocated projectile mass", 0.006d, conservation.AllocatedParentMassKilograms);
+            AssertNear("telemetry unallocated projectile mass", 0.0035d, conservation.UnallocatedParentMassKilograms);
+            AssertNear("telemetry fresh target spall mass", 0.001d, conservation.TargetSpallMassKilograms);
+            AssertNear("telemetry parent energy", 3040d, conservation.ParentEnergyJoules);
+            AssertNear("telemetry modeled losses", 2270d, conservation.ModeledLossEnergyJoules);
+            AssertNear("telemetry residual energy", 770d, conservation.ResidualEnergyJoules);
+            AssertNear("telemetry output energy", 770d, conservation.OutputEnergyJoules);
+            AssertNear("telemetry energy closure", 0d, conservation.EnergyClosureErrorJoules);
+            AssertEqual("telemetry parent-derived count", 1, conservation.ParentDerivedOutputCount);
+            AssertEqual("telemetry target-spall count", 1, conservation.TargetSpallOutputCount);
+
+            PhysicalProjectileTelemetryEvent prepared = PhysicalProjectileTelemetryFactory.CreatePrepared(
+                "transition-1",
+                host,
+                impact,
+                parent);
+            AssertEqual("prepared telemetry stage", PhysicalTelemetryStage.CollisionPrepared, prepared.Stage);
+            AssertEqual("prepared telemetry output count", 0, prepared.Outputs.Count);
+            AssertTrue("prepared telemetry has no conservation", prepared.Conservation == null);
+
+            int deliveredCount = 0;
+            object? deliveredValue = null;
+            Action<object> failingObserver = delegate { throw new InvalidOperationException("observer failure"); };
+            Action<object> recordingObserver = observed =>
+            {
+                deliveredCount++;
+                deliveredValue = observed;
+            };
+            PhysicalProjectileTelemetry.Subscribe(failingObserver);
+            PhysicalProjectileTelemetry.Subscribe(recordingObserver);
+            try
+            {
+                AssertTrue("physical telemetry reports active subscribers", PhysicalProjectileTelemetry.HasSubscribers);
+                PhysicalProjectileTelemetry.Publish(value);
+            }
+            finally
+            {
+                PhysicalProjectileTelemetry.Unsubscribe(failingObserver);
+                PhysicalProjectileTelemetry.Unsubscribe(recordingObserver);
+            }
+
+            AssertEqual("later observer survives earlier failure", 1, deliveredCount);
+            AssertTrue("observer receives exact immutable event", ReferenceEquals(value, deliveredValue));
+            AssertTrue("physical telemetry removes all subscribers", !PhysicalProjectileTelemetry.HasSubscribers);
+
+            var invalidLossBudget = new PhysicalLossBudget(double.NaN, 0d, 0d, 0d, 0d);
+            AssertTrue(
+                "invalid physical telemetry is rejected without a partial event",
+                !PhysicalProjectileTelemetryFactory.TryCreateResolved(
+                    "transition-invalid",
+                    PhysicalCollisionOutcome.Fragmented,
+                    host,
+                    impact,
+                    parent,
+                    new[] { projectileOutput },
+                    invalidLossBudget,
+                    out PhysicalProjectileTelemetryEvent? invalid)
+                && invalid == null);
+
+            PhysicalProjectileState excessiveMass = CreateChildState(
+                parent,
+                PhysicalProjectileKind.ProjectileFragment,
+                "telemetry-over-mass",
+                2,
+                0.02d,
+                1d);
+            AssertTrue(
+                "telemetry rejects parent-derived mass above the incoming component",
+                !PhysicalProjectileTelemetryFactory.TryCreateResolved(
+                    "transition-over-mass",
+                    PhysicalCollisionOutcome.Fragmented,
+                    host,
+                    impact,
+                    parent,
+                    new[] { excessiveMass },
+                    new PhysicalLossBudget(0d, 0d, 0d, 0d, 0d),
+                    out invalid)
+                && invalid == null);
+
+            PhysicalProjectileState excessiveEnergy = CreateChildState(
+                parent,
+                PhysicalProjectileKind.ProjectileFragment,
+                "telemetry-over-energy",
+                3,
+                0.009d,
+                1000d);
+            AssertTrue(
+                "telemetry rejects output energy above the residual budget",
+                !PhysicalProjectileTelemetryFactory.TryCreateResolved(
+                    "transition-over-energy",
+                    PhysicalCollisionOutcome.Fragmented,
+                    host,
+                    impact,
+                    parent,
+                    new[] { excessiveEnergy },
+                    new PhysicalLossBudget(0d, 0d, 0d, 0d, 0d),
+                    out invalid)
+                && invalid == null);
+
+            AssertTrue(
+                "telemetry rejects losses above parent energy",
+                !PhysicalProjectileTelemetryFactory.TryCreateResolved(
+                    "transition-over-loss",
+                    PhysicalCollisionOutcome.Stopped,
+                    host,
+                    impact,
+                    parent,
+                    new[] { projectileOutput },
+                    new PhysicalLossBudget(4000d, 0d, 0d, 0d, 0d),
+                    out invalid)
+                && invalid == null);
         }
 
         private static void ValidateDeterministicProjectileRandom()

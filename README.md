@@ -157,6 +157,15 @@ or mutate Unity objects. The default dimension scale is one and the default mini
 is zero, so calculated component size is preserved unless the user deliberately enables visual-only
 enlargement.
 
+The physical runtime also exposes an optional, versioned transition telemetry boundary. It publishes
+immutable prepared and resolved collision records through BCL-only subscription methods, so an
+external development tool can observe complete SI state without a compile-time dependency. Records
+include copied shot lineage, measured impact geometry, target profile, parent and output components,
+separate projectile-derived and fresh target-spall mass, declared losses, residual/output energy,
+and closure error. No pooled host or Unity object is retained. With no subscriber, the collision path
+returns before constructing a telemetry snapshot; subscriber exceptions are isolated from the
+simulation and from other subscribers.
+
 This runtime path has passed offline compiler, analyzer, invariant, conservation, deterministic,
 renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. It has
 not completed the final integrated in-game acceptance campaign and remains experimental.
@@ -222,7 +231,8 @@ material-profile validation, deformation and obliquity response, stopped-energy 
 component-specific fragmentation and target-spall construction, physical-to-EFT projection,
 measured-flight reconciliation, material-exit placement, continuing target-spall fragmentation,
 fragment-budget closure, deterministic component meshes, physical yaw, visual ownership generations,
-culling boundaries, capacity limits, and renderer-core dependency isolation; the SNB regression rows;
+culling boundaries, capacity limits, renderer-core dependency isolation, immutable physical
+transition telemetry, projectile/spall accounting, energy closure, and observer isolation; the SNB regression rows;
 weapon-independence at a fixed impact
 speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
 5.45x39 US; all current local ballistic item templates; and exact acceptance of

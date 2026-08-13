@@ -2,14 +2,17 @@
 
 Snapshot date: 2026-08-13
 
-## Current live release
+## Current development build
 
 - Plugin version: `1.2.0`
 - Supported environment: SPT `4.1.2`, EFT `0.16.9.40743`
-- Active systems: exact collision-point velocity falloff, uncapped damage and penetration
+- Production systems: exact collision-point velocity falloff, uncapped damage and penetration
   curves, cumulative multi-surface scaling, EFT armor integration, and postmortem armor
   durability processing
-- Physical projectile state: not connected to live shots in `1.2.0`
+- Experimental physical runtime: connected to host-confirmed collision outcomes behind a
+  default-off configuration gate; implemented offline and awaiting end-of-development integrated
+  game testing
+- This development build has not been deployed
 
 ## Physical-state development baseline
 
@@ -68,10 +71,13 @@ Snapshot date: 2026-08-13
 - The runtime seam is verified: `Shot.CreateFragments` finishes child construction before
   `BallisticsCalculator.UpdateShots` schedules `Shot.Fragments`, so an outer postfix can validate,
   rewrite, and reinitialize children before their first tick
-- `PhysicalShotBindingStore` is ready for that seam and rejects stale entries when EFT recycles a
+- `PhysicalShotBindingStore` implements that seam and rejects stale entries when EFT recycles a
   pooled `Shot`; it matches the complete captured creation identity rather than trusting the object
   reference alone
-- These layers are not connected to live shots yet; no gameplay behavior changed in this baseline
+- A collision transition replaces the host child list only after every physical state, projection,
+  replacement shot, trajectory, armor-CF application, and binding succeeds
+- Roots, retained primaries, projectile fragments, and target spall continue through the same
+  measured-flight and later-collision path
 
 ## Deformation and material response
 
@@ -94,18 +100,46 @@ Snapshot date: 2026-08-13
   fail open instead of overriding the host result
 - No host penetration, ricochet, deviation, fragmentation, or armor random decision is
   evaluated again
-- Current profiles are synthetic validation fixtures only. There is no live ammunition,
-  armor, body, or world-material calibration or runtime mapping yet
+- Runtime mappings use conservative construction and material-class profiles derived from the
+  limited host fields. They remain engineering estimates, not manufacturer metallurgy or
+  certification data
 - Target density is carried for the later spall stage and is not claimed to affect the
   present deformation calculation
 - Physical thickness is retained as measured geometry while effective path drives work;
   no thickness effect is claimed without a supplied material path
 
+## Physical component rendering
+
+- Eight deterministic low-poly meshes represent spitzer, round-nose, flat-nose, expanded,
+  flattened, irregular projectile-fragment, spall-flake, and spall-chunk geometry
+- Mesh scale uses each component's calculated diameter and length; physical attitude and yaw are
+  carried through later measured flight instead of being reconstructed from a decal
+- Unity work is restricted to the main thread; collision hooks enqueue immutable render commands
+- A generation-owned fixed pool rejects stale owners, validates pooled-shot identity, recovers
+  destroyed slots, shrinks safely while idle, and cleans up on scene transitions
+- Nearest-first culling, separate visible/tracked limits, embedded expiry, shared materials and
+  meshes, and disabled shadows/probes/motion vectors bound rendering cost
+
+## Physical transition telemetry
+
+- Public schema: `PhysicalProjectileTelemetry.SchemaVersion == 1`
+- `Subscribe(Action<object>)` and `Unsubscribe(Action<object>)` form a compile-time-independent
+  observation boundary; the payload is the typed immutable `PhysicalProjectileTelemetryEvent`
+- No host object, collider, shot, Unity object, or mutable output collection is retained
+- Prepared events are emitted only after collision state validation; resolved events are emitted
+  only after stopped-state registration or complete transactional child replacement
+- Records carry copied host identity, exact impact geometry, target profile, the complete immutable
+  parent and outputs, projectile-derived mass, fresh target-spall mass, all loss categories,
+  residual/output energy, and closure error
+- The runtime performs no telemetry snapshot work with zero subscribers, and one failing subscriber
+  cannot interrupt another subscriber or the physical transaction
+
 ## Verification
 
-- Checked Release build with latest recommended analyzers and warnings as errors: zero
-  warnings, zero errors
-- Validation groups: 31 passed, zero failed, including 4,096 deterministic deformation cases,
+- Checked Release and Debug builds with all default analyzers enabled, warnings as errors, checked
+  arithmetic, deterministic continuous-integration settings: zero warnings, zero errors
+- Validation groups: 38 passed, zero failed, including immutable telemetry and observer isolation,
+  deterministic render geometry and ownership, 4,096 deterministic deformation cases,
   4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
   reconciliation, fail-open rejection, and the complete installed-ammunition sweep
 - Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
@@ -114,9 +148,7 @@ Snapshot date: 2026-08-13
 
 ## Next dependency
 
-Connect the verified physical state, deformation, fragmentation, projection, and flight layers to
-EFT shots through the existing `CreateFragments` target. Runtime integration must keep a pool-safe
-shot-to-state binding, measure a real collider material path, preserve EFT's already-selected
-outcome and armor CF, reinitialize every rewritten child trajectory, create any conserved retained
-primary or target-spall components before scheduling, and leave the original child list untouched
-when any validation step fails.
+Extend the standalone development lab through reflection-only subscription to the public telemetry
+boundary. Add schema-version validation, immutable report DTOs, paired prepared/resolved transition
+storage, conservation exports, deterministic campaign matrices, and automatic fixture reset without
+introducing a project reference or runtime dependency in either direction.
