@@ -77,6 +77,25 @@ Armor block and penetration outcomes can change because the existing armor calcu
 reads the corrected `PenetrationPower`. That is the intended gameplay effect. The
 separate armor-CF child-shot degradation remains unpatched.
 
+## Physical projectile development
+
+The development tree now contains a dependency-free, versioned physical-state core for
+intact projectiles, deformed projectiles, projectile fragments, and target-generated
+spall. It records component-specific SI values for mass, geometry, projected area, drag,
+position, velocity, momentum, kinetic energy, orientation, yaw, terminal state, lineage,
+and collision history.
+
+Projectile-derived mass and target spall are separate categories. Transition validation
+rejects projectile-mass over-allocation, child energy above the residual collision budget,
+mixed parent/root/collision lineage, duplicate component identities, non-finite state, and
+fragmentation events with no physical projectile fragment. A fixed PCG random stream is
+provided for later deformation and fragmentation calculations.
+
+This foundation is not yet attached to EFT shots and therefore does not change live
+gameplay in version `1.2.0`. The next stage is the deformation and material-response
+solver; runtime integration follows only after its calculations and conservation rules are
+validated.
+
 ## Configuration
 
 After the game starts once, BepInEx creates:
@@ -123,12 +142,13 @@ dotnet build .\BallisticPenetration.sln -c Release "-p:SptRoot=$env:SPT_ROOT"
 dotnet run --project .\tests\BallisticPenetration.Validation\BallisticPenetration.Validation.csproj -c Release -- "$env:SPT_ROOT\SPT_Runtime\SPT_Data\database\templates\items.json"
 ```
 
-The validation suite checks postmortem armor guards and layer traversal, the SNB
-regression rows, weapon-independence at a fixed impact speed, uncapped factors above
-one, zero and invalid-input handling, cumulative
-falloff, 5.45x39 US, all current local ballistic item templates, and exact acceptance
-of `com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part
-versions.
+The validation suite checks postmortem armor guards and layer traversal; physical state,
+collision history, SI-derived values, fail-open rejection, projectile/spall separation,
+mass and energy conservation, and deterministic random output; the SNB regression rows;
+weapon-independence at a fixed impact speed; uncapped factors above one; zero and
+invalid-input handling; cumulative falloff; 5.45x39 US; all current local ballistic item
+templates; and exact acceptance of `com.SPT.core` version `4.1.2` while rejecting missing,
+lower, higher, or four-part versions.
 
 The game-facing project has compile-only references to BepInEx, Harmony, SPT reflection,
 Assembly-CSharp, UnityEngine.CoreModule, and UnityEngine. `UnityEngine.dll` is required

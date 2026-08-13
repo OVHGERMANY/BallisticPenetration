@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using BallisticPenetration.Core;
+using BallisticPenetration.Core.Physics;
 
 namespace BallisticPenetration.Validation
 {
@@ -48,6 +49,11 @@ namespace BallisticPenetration.Validation
             Run("Exact SPT core version gate", ValidateExactSptCoreVersionGate);
             Run("Postmortem armor hit guards", ValidatePostmortemArmorHitGuards);
             Run("Postmortem armor traversal", ValidatePostmortemArmorTraversal);
+            Run("Physical collision history invariants", ValidatePhysicalCollisionHistory);
+            Run("Physical projectile state and derived SI values", ValidatePhysicalProjectileState);
+            Run("Physical projectile invalid-state fallback", ValidatePhysicalProjectileInvalidFallback);
+            Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
+            Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Parse SPT items.json safely with System.Text.Json", delegate
             {
                 templates = LoadTemplatesWithBallisticStats(itemsPath);
@@ -275,6 +281,553 @@ namespace BallisticPenetration.Validation
             }
 
             return applied;
+        }
+
+        private static void ValidatePhysicalCollisionHistory()
+        {
+            PhysicalCollisionRecord record;
+            PhysicalCollisionRecordFailureReason reason;
+            PhysicalCollisionRecordInput input = CreateValidCollisionInput();
+            AssertTrue(
+                "valid physical collision record accepted",
+                PhysicalCollisionRecord.TryCreate(input, out record, out reason));
+            AssertEqual("valid physical collision reason", PhysicalCollisionRecordFailureReason.None, reason);
+            AssertEqual("collision id preserved", "collision-1", record.CollisionId);
+            AssertNear("collision path length preserved", 0.012d, record.EffectivePathLengthMetres);
+            AssertEqual("collision outcome preserved", PhysicalCollisionOutcome.Penetrated, record.Outcome);
+
+            input = CreateValidCollisionInput();
+            input.OutgoingTranslationalEnergyJoules = 5000.01d;
+            AssertTrue(
+                "collision energy creation fails open",
+                !PhysicalCollisionRecord.TryCreate(input, out record, out reason));
+            AssertTrue("failed collision returns no record", record == null);
+            AssertEqual(
+                "collision energy failure reason",
+                PhysicalCollisionRecordFailureReason.OutgoingEnergyExceedsIncoming,
+                reason);
+
+            input = CreateValidCollisionInput();
+            input.PositionMetres = new PhysicalVector3(double.NaN, 0d, 0d);
+            AssertTrue(
+                "nonfinite collision position rejected",
+                !PhysicalCollisionRecord.TryCreate(input, out record, out reason));
+            AssertEqual(
+                "nonfinite collision position reason",
+                PhysicalCollisionRecordFailureReason.PositionInvalid,
+                reason);
+        }
+
+        private static void ValidatePhysicalProjectileState()
+        {
+            PhysicalCollisionRecord collision = CreateValidCollisionRecord();
+            var mutableHistory = new List<PhysicalCollisionRecord> { collision };
+            PhysicalProjectileStateInput input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            double area;
+            AssertTrue(
+                "deformed circular area calculated",
+                PhysicalProjectileGeometry.TryCalculateCircularAreaSquareMetres(0.008d, out area));
+            input.Kind = PhysicalProjectileKind.DeformedProjectile;
+            input.ShapeClass = PhysicalProjectileShapeClass.ExpandedMushroom;
+            input.DeformedDiameterMetres = 0.008d;
+            input.ProjectedAreaSquareMetres = area;
+            input.LengthMetres = 0.025d;
+            input.DragCoefficient = 0.32d;
+            input.YawAngleRadians = 0.08d;
+            input.TumbleState = PhysicalProjectileTumbleState.Yawing;
+            input.DamageCapabilityJoules = 2500d;
+            input.PenetrationCapabilityJoulesPerSquareMetre = 2500d / area;
+            input.CollisionHistory = mutableHistory;
+
+            PhysicalProjectileState state;
+            PhysicalProjectileStateFailureReason reason;
+            AssertTrue(
+                "valid physical projectile accepted",
+                PhysicalProjectileState.TryCreate(input, out state, out reason));
+            AssertEqual("valid physical projectile reason", PhysicalProjectileStateFailureReason.None, reason);
+            AssertEqual("physical state schema", 1, PhysicalProjectileState.SchemaVersion);
+            AssertNear("physical projectile speed", 800d, state.SpeedMetresPerSecond);
+            AssertNear("physical projectile momentum x", 0d, state.MomentumKilogramMetresPerSecond.X);
+            AssertNear("physical projectile momentum z", 7.6d, state.MomentumKilogramMetresPerSecond.Z);
+            AssertNear("physical projectile kinetic energy", 3040d, state.TranslationalKineticEnergyJoules);
+            AssertNear("physical projectile equivalent diameter", 0.008d, state.EquivalentDiameterMetres);
+            AssertNear("physical projectile aspect ratio", 3.125d, state.AspectRatio);
+            AssertNear(
+                "component-specific physical ballistic coefficient",
+                0.0095d / (0.32d * area),
+                state.BallisticCoefficientKilogramsPerSquareMetre);
+            AssertEqual("physical projectile history copied", 1, state.CollisionHistory.Count);
+            AssertTrue("physical projectile mass classified as projectile", state.IsProjectileDerivedMass);
+
+            mutableHistory.Clear();
+            AssertEqual("physical projectile history is immutable", 1, state.CollisionHistory.Count);
+
+            double equivalentDiameter;
+            AssertTrue(
+                "equivalent diameter calculation succeeds",
+                PhysicalProjectileGeometry.TryCalculateEquivalentDiameterMetres(
+                    state.ProjectedAreaSquareMetres,
+                    out equivalentDiameter));
+            AssertNear("equivalent diameter round trip", 0.008d, equivalentDiameter);
+        }
+
+        private static void ValidatePhysicalProjectileInvalidFallback()
+        {
+            PhysicalProjectileStateInput input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.OriginalMassKilograms = double.NaN;
+            AssertPhysicalStateFailure(
+                "nonfinite original mass",
+                input,
+                PhysicalProjectileStateFailureReason.OriginalMassInvalid);
+            AssertTrue("failed state does not rewrite input", double.IsNaN(input.OriginalMassKilograms));
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0101d);
+            AssertPhysicalStateFailure(
+                "retained mass exceeds original",
+                input,
+                PhysicalProjectileStateFailureReason.RetainedMassExceedsOriginal);
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.ProjectedAreaSquareMetres = 0d;
+            AssertPhysicalStateFailure(
+                "zero projected area",
+                input,
+                PhysicalProjectileStateFailureReason.ProjectedAreaInvalid);
+
+            input = CreateValidRootInput(0d, 0.01d, 0.0095d);
+            AssertPhysicalStateFailure(
+                "continuing projectile with zero velocity",
+                input,
+                PhysicalProjectileStateFailureReason.MovingStateHasZeroVelocity);
+
+            input = CreateValidRootInput(10d, 0.01d, 0.0095d);
+            input.TerminalState = PhysicalProjectileTerminalState.Stopped;
+            AssertPhysicalStateFailure(
+                "stopped projectile with velocity",
+                input,
+                PhysicalProjectileStateFailureReason.RestingStateHasVelocity);
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.Orientation = new PhysicalOrientation(0d, 0d, 0d, 2d);
+            AssertPhysicalStateFailure(
+                "nonnormalized orientation",
+                input,
+                PhysicalProjectileStateFailureReason.OrientationInvalid);
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.DamageCapabilityJoules = 5000d;
+            AssertPhysicalStateFailure(
+                "damage energy exceeds available kinetic energy",
+                input,
+                PhysicalProjectileStateFailureReason.DamageCapabilityExceedsEnergy);
+
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(1000d, 0.01d, 0.01d));
+            input = CreateChildInput(
+                parent,
+                PhysicalProjectileKind.ProjectileFragment,
+                "fragment-invalid-source",
+                0,
+                0.001d,
+                400d);
+            input.SourceMaterialClass = PhysicalMaterialClass.Unknown;
+            AssertPhysicalStateFailure(
+                "child without a physical source material",
+                input,
+                PhysicalProjectileStateFailureReason.ChildLineageInvalid);
+
+            input = CreateChildInput(
+                parent,
+                PhysicalProjectileKind.TargetSpall,
+                "spall-invalid-origin",
+                0,
+                0.001d,
+                400d);
+            input.Construction = PhysicalProjectileConstruction.SteelCoreJacketed;
+            AssertPhysicalStateFailure(
+                "target spall with projectile construction",
+                input,
+                PhysicalProjectileStateFailureReason.MaterialOriginMismatch);
+
+            PhysicalCollisionRecord collision = CreateValidCollisionRecord();
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.CollisionHistory = new[] { collision, collision };
+            AssertPhysicalStateFailure(
+                "duplicate collision history identity",
+                input,
+                PhysicalProjectileStateFailureReason.DuplicateCollisionId);
+        }
+
+        private static void ValidatePhysicalConservation()
+        {
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(1000d, 0.01d, 0.01d));
+            var outputs = new[]
+            {
+                CreateChildState(parent, PhysicalProjectileKind.DeformedProjectile, "core-1", 0, 0.006d, 700d),
+                CreateChildState(parent, PhysicalProjectileKind.ProjectileFragment, "fragment-1", 1, 0.002d, 500d),
+                CreateChildState(parent, PhysicalProjectileKind.ProjectileFragment, "fragment-2", 2, 0.001d, 400d),
+                CreateChildState(parent, PhysicalProjectileKind.TargetSpall, "spall-1", 3, 0.003d, 300d)
+            };
+            var losses = new PhysicalLossBudget(600d, 150d, 100d, 100d, 50d);
+
+            PhysicalConservationResult result;
+            PhysicalConservationFailureReason reason;
+            AssertTrue(
+                "conserved fragmentation transition accepted",
+                PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    outputs,
+                    losses,
+                    out result,
+                    out reason));
+            AssertEqual("conserved fragmentation reason", PhysicalConservationFailureReason.None, reason);
+            AssertNear("available projectile mass", 0.01d, result.AvailableProjectileMassKilograms);
+            AssertNear("allocated projectile mass excludes spall", 0.009d, result.AllocatedProjectileMassKilograms);
+            AssertNear("retained projectile mass excludes spall", 0.009d, result.RetainedProjectileMassKilograms);
+            AssertNear("target spall mass remains separate", 0.003d, result.TargetSpallMassKilograms);
+            AssertNear("modeled energy losses", 1000d, result.ModeledLossEnergyJoules);
+            AssertNear("residual child energy budget", 4000d, result.ResidualEnergyJoules);
+            AssertNear("summed child kinetic energy", 1935d, result.ChildEnergyJoules);
+            AssertNear("unallocated parent projectile mass", 0.001d, result.UnallocatedProjectileMassKilograms);
+            AssertNear("unallocated residual energy", 2065d, result.UnallocatedResidualEnergyJoules);
+            AssertEqual("projectile output count", 3, result.ProjectileOutputCount);
+            AssertEqual("target spall output count", 1, result.TargetSpallOutputCount);
+
+            var massViolation = new List<PhysicalProjectileState>(outputs)
+            {
+                CreateChildState(parent, PhysicalProjectileKind.ProjectileFragment, "fragment-over-mass", 4, 0.002d, 100d)
+            };
+            AssertTrue(
+                "projectile mass over-allocation rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    massViolation,
+                    losses,
+                    out result,
+                    out reason));
+            AssertEqual(
+                "projectile mass over-allocation reason",
+                PhysicalConservationFailureReason.ProjectileMassExceedsParent,
+                reason);
+
+            var energyViolation = new[]
+            {
+                CreateChildState(parent, PhysicalProjectileKind.ProjectileFragment, "fragment-over-energy", 0, 0.009d, 1000d)
+            };
+            AssertTrue(
+                "child energy over-allocation rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    energyViolation,
+                    losses,
+                    out result,
+                    out reason));
+            AssertEqual(
+                "child energy over-allocation reason",
+                PhysicalConservationFailureReason.ChildEnergyExceedsResidual,
+                reason);
+
+            var largeSpallMass = new[]
+            {
+                CreateChildState(parent, PhysicalProjectileKind.ProjectileFragment, "fragment-valid", 0, 0.009d, 100d),
+                CreateChildState(parent, PhysicalProjectileKind.TargetSpall, "spall-heavy", 1, 0.05d, 100d)
+            };
+            AssertTrue(
+                "target spall mass does not consume projectile mass",
+                PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    largeSpallMass,
+                    losses,
+                    out result,
+                    out reason));
+            AssertNear("large target spall mass reported separately", 0.05d, result.TargetSpallMassKilograms);
+            AssertNear("large target spall leaves projectile allocation unchanged", 0.009d, result.AllocatedProjectileMassKilograms);
+
+            var noProjectileFragment = new[]
+            {
+                CreateChildState(parent, PhysicalProjectileKind.DeformedProjectile, "core-only", 0, 0.009d, 100d),
+                CreateChildState(parent, PhysicalProjectileKind.TargetSpall, "spall-only", 1, 0.002d, 100d)
+            };
+            AssertTrue(
+                "fragmentation state without a projectile fragment rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    noProjectileFragment,
+                    losses,
+                    out result,
+                    out reason));
+            AssertEqual(
+                "missing physical fragment reason",
+                PhysicalConservationFailureReason.ProjectileFragmentMissing,
+                reason);
+
+            PhysicalProjectileStateInput mismatchedCollisionInput = CreateChildInput(
+                parent,
+                PhysicalProjectileKind.ProjectileFragment,
+                "fragment-other-collision",
+                4,
+                0.0005d,
+                100d);
+            mismatchedCollisionInput.SourceCollisionId = "collision-other";
+            var mismatchedCollisionOutputs = new[]
+            {
+                outputs[1],
+                CreatePhysicalStateOrThrow(mismatchedCollisionInput)
+            };
+            AssertTrue(
+                "mixed collision outputs rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationTransition(
+                    parent,
+                    mismatchedCollisionOutputs,
+                    losses,
+                    out result,
+                    out reason));
+            AssertEqual(
+                "mixed collision output reason",
+                PhysicalConservationFailureReason.SourceCollisionMismatch,
+                reason);
+
+            var invalidLosses = new PhysicalLossBudget(0d, -1d, 0d, 0d, 0d);
+            AssertTrue(
+                "invalid loss budget fails open",
+                !PhysicalProjectileConservation.TryValidateTransition(
+                    parent,
+                    outputs,
+                    invalidLosses,
+                    out result,
+                    out reason));
+            AssertEqual(
+                "invalid loss budget reason",
+                PhysicalConservationFailureReason.LossBudgetInvalid,
+                reason);
+        }
+
+        private static void ValidateDeterministicProjectileRandom()
+        {
+            uint[] expectedSequence =
+            {
+                0xA15C02B7u,
+                0x7B47F409u,
+                0xBA1D3330u,
+                0x83D2F293u,
+                0xBFA4784Bu,
+                0xCBED606Eu
+            };
+            var known = new DeterministicProjectileRandom(42UL, 54UL);
+            for (int index = 0; index < expectedSequence.Length; index++)
+            {
+                AssertEqual(
+                    "stable PCG output " + index,
+                    expectedSequence[index],
+                    known.NextUInt32());
+            }
+
+            var first = new DeterministicProjectileRandom(0x123456789ABCDEF0UL, 7UL);
+            var second = new DeterministicProjectileRandom(0x123456789ABCDEF0UL, 7UL);
+            for (int index = 0; index < 64; index++)
+            {
+                AssertEqual(
+                    "same projectile seed and stream remain deterministic " + index,
+                    first.NextUInt32(),
+                    second.NextUInt32());
+            }
+
+            first = new DeterministicProjectileRandom(99UL, 13UL);
+            second = new DeterministicProjectileRandom(99UL, 13UL);
+            for (int index = 0; index < 32; index++)
+            {
+                double firstValue = first.NextUnitDouble();
+                double secondValue = second.NextUnitDouble();
+                AssertNear("deterministic unit double " + index, firstValue, secondValue);
+                AssertTrue("unit double lower bound " + index, firstValue >= 0d);
+                AssertTrue("unit double upper bound " + index, firstValue < 1d);
+            }
+
+            var differentSeed = new DeterministicProjectileRandom(100UL, 13UL);
+            var referenceSeed = new DeterministicProjectileRandom(99UL, 13UL);
+            AssertTrue(
+                "different projectile seed changes stream",
+                differentSeed.NextUInt32() != referenceSeed.NextUInt32());
+        }
+
+        private static PhysicalCollisionRecordInput CreateValidCollisionInput()
+        {
+            return new PhysicalCollisionRecordInput
+            {
+                CollisionId = "collision-1",
+                MaterialId = "armor-steel",
+                MaterialClass = PhysicalMaterialClass.ArmoredSteel,
+                Sequence = 0,
+                PositionMetres = new PhysicalVector3(1d, 2d, 3d),
+                IncomingVelocityMetresPerSecond = new PhysicalVector3(0d, 0d, 1000d),
+                OutgoingVelocityMetresPerSecond = new PhysicalVector3(0d, 0d, 800d),
+                IncomingTranslationalEnergyJoules = 5000d,
+                OutgoingTranslationalEnergyJoules = 3040d,
+                ImpactAngleRadians = 0.2d,
+                EffectivePathLengthMetres = 0.012d,
+                Outcome = PhysicalCollisionOutcome.Penetrated
+            };
+        }
+
+        private static PhysicalCollisionRecord CreateValidCollisionRecord()
+        {
+            PhysicalCollisionRecord record;
+            PhysicalCollisionRecordFailureReason reason;
+            if (!PhysicalCollisionRecord.TryCreate(CreateValidCollisionInput(), out record, out reason))
+            {
+                throw new InvalidOperationException("Valid collision record creation failed: " + reason + ".");
+            }
+
+            return record;
+        }
+
+        private static PhysicalProjectileStateInput CreateValidRootInput(
+            double speedMetresPerSecond,
+            double originalMassKilograms,
+            double retainedMassKilograms)
+        {
+            const double diameterMetres = 0.00762d;
+            double area;
+            if (!PhysicalProjectileGeometry.TryCalculateCircularAreaSquareMetres(diameterMetres, out area))
+            {
+                throw new InvalidOperationException("Could not calculate root projectile area.");
+            }
+
+            double energyJoules = 0.5d
+                * retainedMassKilograms
+                * speedMetresPerSecond
+                * speedMetresPerSecond;
+            return new PhysicalProjectileStateInput
+            {
+                Kind = PhysicalProjectileKind.IntactProjectile,
+                ProjectileId = "root-projectile",
+                RootShotId = "root-shot",
+                FragmentIndex = -1,
+                FragmentGeneration = 0,
+                DeterministicSeed = 0xC0FFEEUL,
+                Construction = PhysicalProjectileConstruction.SteelCoreJacketed,
+                ShapeClass = PhysicalProjectileShapeClass.Spitzer,
+                OriginalMassKilograms = originalMassKilograms,
+                RetainedMassKilograms = retainedMassKilograms,
+                NominalDiameterMetres = diameterMetres,
+                DeformedDiameterMetres = diameterMetres,
+                ProjectedAreaSquareMetres = area,
+                LengthMetres = 0.028d,
+                DragCoefficient = 0.295d,
+                PositionMetres = new PhysicalVector3(1d, 2d, 3d),
+                VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, speedMetresPerSecond),
+                Orientation = PhysicalOrientation.Identity,
+                YawAngleRadians = 0d,
+                TumbleState = PhysicalProjectileTumbleState.Stable,
+                PenetrationCapabilityJoulesPerSquareMetre = energyJoules / area,
+                DamageCapabilityJoules = energyJoules * 0.75d,
+                TerminalState = PhysicalProjectileTerminalState.Continuing,
+                RenderState = PhysicalProjectileRenderState.NotRendered,
+                CollisionHistory = Array.Empty<PhysicalCollisionRecord>()
+            };
+        }
+
+        private static PhysicalProjectileStateInput CreateChildInput(
+            PhysicalProjectileState parent,
+            PhysicalProjectileKind kind,
+            string projectileId,
+            int fragmentIndex,
+            double massKilograms,
+            double speedMetresPerSecond)
+        {
+            bool isSpall = kind == PhysicalProjectileKind.TargetSpall;
+            double diameterMetres = isSpall ? 0.004d : 0.003d;
+            double area;
+            if (!PhysicalProjectileGeometry.TryCalculateCircularAreaSquareMetres(diameterMetres, out area))
+            {
+                throw new InvalidOperationException("Could not calculate child projectile area.");
+            }
+
+            double energyJoules = 0.5d * massKilograms * speedMetresPerSecond * speedMetresPerSecond;
+            return new PhysicalProjectileStateInput
+            {
+                Kind = kind,
+                ProjectileId = projectileId,
+                RootShotId = parent.RootShotId,
+                ParentProjectileId = parent.ProjectileId,
+                SourceProjectileId = parent.ProjectileId,
+                SourceMaterialId = "armor-steel",
+                SourceMaterialClass = PhysicalMaterialClass.ArmoredSteel,
+                SourceCollisionId = "collision-fragmentation",
+                FragmentIndex = fragmentIndex,
+                FragmentGeneration = parent.FragmentGeneration + 1,
+                DeterministicSeed = parent.DeterministicSeed + (ulong)(fragmentIndex + 1),
+                Construction = isSpall
+                    ? PhysicalProjectileConstruction.TargetMaterial
+                    : parent.Construction,
+                ShapeClass = isSpall
+                    ? PhysicalProjectileShapeClass.TargetSpallFlake
+                    : kind == PhysicalProjectileKind.DeformedProjectile
+                        ? PhysicalProjectileShapeClass.FlattenedDisc
+                        : PhysicalProjectileShapeClass.IrregularProjectileFragment,
+                OriginalMassKilograms = massKilograms,
+                RetainedMassKilograms = massKilograms,
+                NominalDiameterMetres = diameterMetres,
+                DeformedDiameterMetres = diameterMetres,
+                ProjectedAreaSquareMetres = area,
+                LengthMetres = isSpall ? 0.001d : 0.006d,
+                DragCoefficient = isSpall ? 1.15d : 0.85d,
+                PositionMetres = parent.PositionMetres,
+                VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, speedMetresPerSecond),
+                Orientation = PhysicalOrientation.Identity,
+                YawAngleRadians = isSpall ? 0.7d : 0.35d,
+                TumbleState = PhysicalProjectileTumbleState.Tumbling,
+                PenetrationCapabilityJoulesPerSquareMetre = energyJoules / area,
+                DamageCapabilityJoules = energyJoules * 0.5d,
+                TerminalState = PhysicalProjectileTerminalState.Continuing,
+                RenderState = PhysicalProjectileRenderState.NotRendered,
+                CollisionHistory = Array.Empty<PhysicalCollisionRecord>()
+            };
+        }
+
+        private static PhysicalProjectileState CreateChildState(
+            PhysicalProjectileState parent,
+            PhysicalProjectileKind kind,
+            string projectileId,
+            int fragmentIndex,
+            double massKilograms,
+            double speedMetresPerSecond)
+        {
+            return CreatePhysicalStateOrThrow(
+                CreateChildInput(
+                    parent,
+                    kind,
+                    projectileId,
+                    fragmentIndex,
+                    massKilograms,
+                    speedMetresPerSecond));
+        }
+
+        private static PhysicalProjectileState CreatePhysicalStateOrThrow(
+            PhysicalProjectileStateInput input)
+        {
+            PhysicalProjectileState state;
+            PhysicalProjectileStateFailureReason reason;
+            if (!PhysicalProjectileState.TryCreate(input, out state, out reason))
+            {
+                throw new InvalidOperationException("Valid physical state creation failed: " + reason + ".");
+            }
+
+            return state;
+        }
+
+        private static void AssertPhysicalStateFailure(
+            string name,
+            PhysicalProjectileStateInput input,
+            PhysicalProjectileStateFailureReason expectedReason)
+        {
+            PhysicalProjectileState state;
+            PhysicalProjectileStateFailureReason actualReason;
+            bool success = PhysicalProjectileState.TryCreate(input, out state, out actualReason);
+            AssertTrue(name + " fails", !success);
+            AssertTrue(name + " returns no state", state == null);
+            AssertEqual(name + " reason", expectedReason, actualReason);
         }
 
         private static void ValidateSnbRows(BallisticTemplate snb)
