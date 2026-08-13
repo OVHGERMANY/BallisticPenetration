@@ -11,7 +11,8 @@ namespace BallisticPenetration.Core.Physics
         IntactProjectile = 1,
         DeformedProjectile = 2,
         ProjectileFragment = 3,
-        TargetSpall = 4
+        TargetSpall = 4,
+        TargetSpallFragment = 5
     }
 
     public enum PhysicalProjectileShapeClass

@@ -26,6 +26,12 @@ namespace BallisticPenetration.Runtime
                 true,
                 "Apply Tarkov's normal armor durability damage when a forward shot hits armor worn by a corpse.");
 
+            EnableExperimentalPhysicalProjectiles = config.Bind(
+                "Experimental",
+                "Enable Physical Projectiles",
+                false,
+                "Enable the unaccepted physical projectile, deformation, fragmentation, and individual-child runtime path. Keep disabled outside controlled testing.");
+
             PenetrationExponent = config.Bind(
                 "Falloff",
                 "Penetration Exponent",
@@ -102,6 +108,8 @@ namespace BallisticPenetration.Runtime
         internal ConfigEntry<bool> Enabled { get; private set; }
 
         internal ConfigEntry<bool> DamageArmorOnCorpses { get; private set; }
+
+        internal ConfigEntry<bool> EnableExperimentalPhysicalProjectiles { get; private set; }
 
         internal ConfigEntry<float> PenetrationExponent { get; private set; }
 

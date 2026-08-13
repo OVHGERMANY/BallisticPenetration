@@ -96,6 +96,7 @@ namespace BallisticPenetration.Core.Physics
             PhysicalLossBudget lossBudget,
             PhysicalVector3 incomingDirection,
             PhysicalVector3 outgoingDirection,
+            PhysicalVector3 outputPositionMetres,
             PhysicalVector3 surfaceNormal,
             double physicalThicknessMetres,
             double effectivePathLengthMetres,
@@ -120,6 +121,7 @@ namespace BallisticPenetration.Core.Physics
             LossBudget = lossBudget;
             IncomingDirection = incomingDirection;
             OutgoingDirection = outgoingDirection;
+            OutputPositionMetres = outputPositionMetres;
             SurfaceNormal = surfaceNormal;
             PhysicalThicknessMetres = physicalThicknessMetres;
             EffectivePathLengthMetres = effectivePathLengthMetres;
@@ -149,6 +151,13 @@ namespace BallisticPenetration.Core.Physics
         public PhysicalVector3 IncomingDirection { get; }
 
         public PhysicalVector3 OutgoingDirection { get; }
+
+        /// <summary>
+        /// Position at which a surviving component begins its next free-flight leg. A penetrated,
+        /// deviated, or fragmented component starts at the measured far face; a ricocheted or
+        /// stopped component remains at the impact face.
+        /// </summary>
+        public PhysicalVector3 OutputPositionMetres { get; }
 
         public PhysicalVector3 SurfaceNormal { get; }
 
@@ -338,6 +347,19 @@ namespace BallisticPenetration.Core.Physics
             {
                 failureReason = PhysicalDeformationFailureReason.OutgoingDirectionInvalid;
                 return false;
+            }
+
+            PhysicalVector3 outputPositionMetres = input.ImpactPositionMetres;
+            if (isMovingOutcome
+                && input.ObservedOutcome != PhysicalCollisionOutcome.Ricocheted)
+            {
+                outputPositionMetres = input.ImpactPositionMetres.Add(
+                    incomingDirection.Scale(input.EffectivePathLengthMetres));
+                if (!outputPositionMetres.IsFinite)
+                {
+                    failureReason = PhysicalDeformationFailureReason.GeometryInvalid;
+                    return false;
+                }
             }
 
             double parentEnergyJoules = parent.TranslationalKineticEnergyJoules;
@@ -554,6 +576,7 @@ namespace BallisticPenetration.Core.Physics
                     parent,
                     collisionRecord,
                     outgoingDirection,
+                    outputPositionMetres,
                     isMovingOutcome,
                     impactAngleRadians,
                     deformationSeverity,
@@ -590,6 +613,7 @@ namespace BallisticPenetration.Core.Physics
                 lossBudget,
                 incomingDirection,
                 outgoingDirection,
+                outputPositionMetres,
                 surfaceNormal,
                 input.PhysicalThicknessMetres,
                 input.EffectivePathLengthMetres,
@@ -619,6 +643,7 @@ namespace BallisticPenetration.Core.Physics
             PhysicalProjectileState parent,
             PhysicalCollisionRecord collisionRecord,
             PhysicalVector3 outgoingDirection,
+            PhysicalVector3 outputPositionMetres,
             bool isMovingOutcome,
             double impactAngleRadians,
             double deformationSeverity,
@@ -738,7 +763,7 @@ namespace BallisticPenetration.Core.Physics
                 ProjectedAreaSquareMetres = projectedAreaSquareMetres,
                 LengthMetres = lengthMetres,
                 DragCoefficient = dragCoefficient,
-                PositionMetres = input.ImpactPositionMetres,
+                PositionMetres = outputPositionMetres,
                 VelocityMetresPerSecond = velocity,
                 Orientation = input.OutgoingOrientation,
                 YawAngleRadians = yawAngleRadians,
@@ -785,6 +810,11 @@ namespace BallisticPenetration.Core.Physics
             PhysicalProjectileState parent,
             double deformationSeverity)
         {
+            if (parent.Construction == PhysicalProjectileConstruction.TargetMaterial)
+            {
+                return PhysicalProjectileKind.TargetSpallFragment;
+            }
+
             if (parent.Kind == PhysicalProjectileKind.ProjectileFragment)
             {
                 return PhysicalProjectileKind.ProjectileFragment;
@@ -806,6 +836,13 @@ namespace BallisticPenetration.Core.Physics
             double diameterExpansionRatio,
             double deformationSeverity)
         {
+            if (parent.Construction == PhysicalProjectileConstruction.TargetMaterial)
+            {
+                return lengthMetres / deformedDiameterMetres < 0.75d
+                    ? PhysicalProjectileShapeClass.TargetSpallFlake
+                    : PhysicalProjectileShapeClass.TargetSpallChunk;
+            }
+
             if (lengthMetres / deformedDiameterMetres < 0.75d)
             {
                 return PhysicalProjectileShapeClass.FlattenedDisc;

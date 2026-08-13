@@ -71,11 +71,14 @@ namespace BallisticPenetration.Validation
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
+            Run("Built-in physical profile catalog", ValidatePhysicalDefaultProfileCatalog);
             Run("Conserved deformation and material response", ValidatePhysicalDeformationResponse);
             Run("Deformation solver fail-open behavior", ValidatePhysicalDeformationFallback);
             Run("Deformation solver deterministic property sweep", ValidatePhysicalDeformationStressSweep);
             Run("Physical fragmentation profile validation", ValidatePhysicalFragmentationProfile);
             Run("Conserved deterministic projectile fragmentation and target spall", ValidatePhysicalFragmentationResponse);
+            Run("Target spall is independent of projectile fragmentation", ValidateIndependentTargetSpall);
+            Run("Target spall survives later deformation and fragmentation", ValidateTargetSpallContinuation);
             Run("Measured root projectiles derive SI geometry and energy", ValidatePhysicalRootProjectileFactory);
             Run("Physical fragments project to independent EFT shot values", ValidatePhysicalEftProjection);
             Run("Physical-to-EFT projection fails open", ValidatePhysicalEftProjectionFallback);
@@ -417,7 +420,8 @@ namespace BallisticPenetration.Validation
                 0.0095d / (0.32d * area),
                 validState.BallisticCoefficientKilogramsPerSquareMetre);
             AssertEqual("physical projectile history copied", 1, validState.CollisionHistory.Count);
-            AssertTrue("physical projectile mass classified as projectile", validState.IsProjectileDerivedMass);
+            AssertTrue("root projectile has no parent-derived allocation", !validState.IsParentDerivedMass);
+            AssertTrue("root projectile is not target-material origin", !validState.IsTargetMaterialOrigin);
 
             mutableHistory.Clear();
             AssertEqual("physical projectile history is immutable", 1, validState.CollisionHistory.Count);
@@ -562,16 +566,16 @@ namespace BallisticPenetration.Validation
                     out result,
                     out reason));
             AssertEqual("conserved fragmentation reason", PhysicalConservationFailureReason.None, reason);
-            AssertNear("available projectile mass", 0.01d, result.AvailableProjectileMassKilograms);
-            AssertNear("allocated projectile mass excludes spall", 0.009d, result.AllocatedProjectileMassKilograms);
-            AssertNear("retained projectile mass excludes spall", 0.009d, result.RetainedProjectileMassKilograms);
+            AssertNear("available parent mass", 0.01d, result.AvailableParentMassKilograms);
+            AssertNear("allocated parent mass excludes new spall", 0.009d, result.AllocatedParentMassKilograms);
+            AssertNear("retained parent mass excludes new spall", 0.009d, result.RetainedParentMassKilograms);
             AssertNear("target spall mass remains separate", 0.003d, result.TargetSpallMassKilograms);
             AssertNear("modeled energy losses", 1000d, result.ModeledLossEnergyJoules);
             AssertNear("residual child energy budget", 4000d, result.ResidualEnergyJoules);
             AssertNear("summed child kinetic energy", 1935d, result.ChildEnergyJoules);
-            AssertNear("unallocated parent projectile mass", 0.001d, result.UnallocatedProjectileMassKilograms);
+            AssertNear("unallocated immediate-parent mass", 0.001d, result.UnallocatedParentMassKilograms);
             AssertNear("unallocated residual energy", 2065d, result.UnallocatedResidualEnergyJoules);
-            AssertEqual("projectile output count", 3, result.ProjectileOutputCount);
+            AssertEqual("parent-derived output count", 3, result.ParentDerivedOutputCount);
             AssertEqual("target spall output count", 1, result.TargetSpallOutputCount);
 
             var massViolation = new List<PhysicalProjectileState>(outputs)
@@ -588,7 +592,7 @@ namespace BallisticPenetration.Validation
                     out reason));
             AssertEqual(
                 "projectile mass over-allocation reason",
-                PhysicalConservationFailureReason.ProjectileMassExceedsParent,
+                PhysicalConservationFailureReason.ParentDerivedMassExceedsParent,
                 reason);
 
             var energyViolation = new[]
@@ -622,7 +626,7 @@ namespace BallisticPenetration.Validation
                     out result,
                     out reason));
             AssertNear("large target spall mass reported separately", 0.05d, result.TargetSpallMassKilograms);
-            AssertNear("large target spall leaves projectile allocation unchanged", 0.009d, result.AllocatedProjectileMassKilograms);
+            AssertNear("large target spall leaves parent allocation unchanged", 0.009d, result.AllocatedParentMassKilograms);
 
             var noProjectileFragment = new[]
             {
@@ -639,7 +643,7 @@ namespace BallisticPenetration.Validation
                     out reason));
             AssertEqual(
                 "missing physical fragment reason",
-                PhysicalConservationFailureReason.ProjectileFragmentMissing,
+                PhysicalConservationFailureReason.ParentFragmentMissing,
                 reason);
 
             PhysicalProjectileStateInput mismatchedCollisionInput = CreateChildInput(
@@ -882,6 +886,17 @@ namespace BallisticPenetration.Validation
                 "observed penetration outcome preserved",
                 PhysicalCollisionOutcome.Penetrated,
                 response.CollisionRecord.Outcome);
+            PhysicalVector3 expectedExitPosition = input.ImpactPositionMetres.Add(
+                RequireNormalized("normal impact incoming direction", parent.VelocityMetresPerSecond)
+                    .Scale(input.EffectivePathLengthMetres));
+            AssertEqual(
+                "penetrated response starts at measured far face",
+                expectedExitPosition,
+                response.OutputPositionMetres);
+            AssertEqual(
+                "penetrated primary starts at measured far face",
+                expectedExitPosition,
+                primaryState.PositionMetres);
 
             PhysicalConservationResult conservationResult;
             PhysicalConservationFailureReason conservationReason;
@@ -1093,6 +1108,14 @@ namespace BallisticPenetration.Validation
                 "host deviated outcome is preserved",
                 PhysicalCollisionOutcome.Deviated,
                 oblique.CollisionRecord.Outcome);
+            AssertEqual(
+                "deviated response starts at measured far face",
+                obliqueInput.ImpactPositionMetres.Add(
+                    RequireNormalized(
+                        "oblique incoming direction",
+                        parent.VelocityMetresPerSecond)
+                        .Scale(obliqueInput.EffectivePathLengthMetres)),
+                oblique.OutputPositionMetres);
 
             PhysicalDeformationInput secondImpactInput = CreateValidDeformationInput(
                 primaryState,
@@ -1199,6 +1222,37 @@ namespace BallisticPenetration.Validation
                 PhysicalProjectileTerminalState.Stopped,
                 stoppedPrimaryState.TerminalState);
             AssertNear("stopped state has zero speed", 0d, stoppedPrimaryState.SpeedMetresPerSecond);
+            AssertEqual(
+                "stopped response remains at impact face",
+                stoppedInput.ImpactPositionMetres,
+                stopped.OutputPositionMetres);
+            AssertEqual(
+                "stopped primary remains at impact face",
+                stoppedInput.ImpactPositionMetres,
+                stoppedPrimaryState.PositionMetres);
+
+            PhysicalDeformationInput ricochetInput = CreateValidDeformationInput(
+                parent,
+                PhysicalCollisionOutcome.Ricocheted,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                "collision-deformation-ricochet",
+                parent.ProjectileId);
+            ricochetInput.ObservedOutgoingDirection = new PhysicalVector3(1d, 0d, 1d);
+            PhysicalDeformationResponse ricochet = SolveDeformationOrThrow(ricochetInput);
+            PhysicalProjectileState ricochetPrimaryState = RequireValue(
+                "ricochet primary state",
+                ricochet.PrimaryState);
+            AssertEqual(
+                "ricochet response remains at impact face",
+                ricochetInput.ImpactPositionMetres,
+                ricochet.OutputPositionMetres);
+            AssertEqual(
+                "ricochet primary remains at impact face",
+                ricochetInput.ImpactPositionMetres,
+                ricochetPrimaryState.PositionMetres);
 
             PhysicalDeformationInput fragmentedInput = CreateValidDeformationInput(
                 parent,
@@ -1683,6 +1737,14 @@ namespace BallisticPenetration.Validation
                     PhysicalProjectileConstruction.TargetMaterial,
                     spall.Construction);
                 AssertTrue(
+                    "target spall records target-material origin "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    spall.IsTargetMaterialOrigin);
+                AssertTrue(
+                    "fresh target spall does not consume parent mass "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    !spall.IsParentDerivedMass);
+                AssertTrue(
                     "target spall has target-material shape " + index.ToString(CultureInfo.InvariantCulture),
                     spall.ShapeClass == PhysicalProjectileShapeClass.TargetSpallFlake
                         || spall.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk);
@@ -1796,7 +1858,7 @@ namespace BallisticPenetration.Validation
                     out conservationReason));
             AssertEqual(
                 "corrupted projectile fragment mass reason",
-                PhysicalConservationFailureReason.ProjectileFragmentMassNotClosed,
+                PhysicalConservationFailureReason.ParentFragmentMassNotClosed,
                 conservationReason);
 
             PhysicalCollisionRecordInput changedCollisionInput = CopyCollisionToInput(
@@ -1850,6 +1912,357 @@ namespace BallisticPenetration.Validation
                 "incorrect target spall reservation reason",
                 PhysicalConservationFailureReason.TargetSpallMassNotClosed,
                 conservationReason);
+        }
+
+        private static void ValidateIndependentTargetSpall()
+        {
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(1000d, 0.01d, 0.01d));
+            PhysicalProjectileMaterialProfile projectileProfile = CreateTestProjectileProfile();
+            PhysicalTargetMaterialProfile targetProfile = CreateTestTargetProfile(
+                50000000d,
+                0.5d);
+            PhysicalDeformationInput deformationInput = CreateValidDeformationInput(
+                parent,
+                PhysicalCollisionOutcome.Penetrated,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                "collision-independent-spall",
+                parent.ProjectileId);
+            deformationInput.ProjectileProfile = projectileProfile;
+            deformationInput.TargetProfile = targetProfile;
+            PhysicalDeformationResponse deformation = SolveDeformationOrThrow(
+                deformationInput);
+            AssertTrue(
+                "independent target spall does not require projectile fragmentation",
+                !deformation.RequiresFragmentation);
+            AssertNear(
+                "nonfragmenting penetration reserves no projectile mass",
+                0d,
+                deformation.AvailableFragmentMassKilograms);
+
+            PhysicalFragmentationProfile fragmentationProfile = CreateTestFragmentationProfile();
+            var spallInput = new PhysicalTargetSpallInput
+            {
+                Parent = parent,
+                DeformationResponse = deformation,
+                TargetProfile = targetProfile,
+                FragmentationProfile = fragmentationProfile,
+                TargetSpallIdPrefix = "independent-spall"
+            };
+            AssertTrue(
+                "independent target spall solves",
+                PhysicalFragmentationSolver.TrySolveTargetSpall(
+                    spallInput,
+                    out PhysicalTargetSpallResponse? response,
+                    out PhysicalTargetSpallFailureReason reason));
+            AssertEqual(
+                "independent target spall reason",
+                PhysicalTargetSpallFailureReason.None,
+                reason);
+            PhysicalTargetSpallResponse value = RequireValue(
+                "independent target spall response",
+                response);
+            AssertTrue("independent target spall emits components", value.Components.Count > 0);
+
+            double massKilograms = 0d;
+            double energyJoules = 0d;
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            var indices = new HashSet<int>();
+            for (int index = 0; index < value.Components.Count; index++)
+            {
+                PhysicalProjectileState component = value.Components[index];
+                AssertEqual(
+                    "independent target spall kind " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileKind.TargetSpall,
+                    component.Kind);
+                AssertEqual(
+                    "independent target spall position " + index.ToString(CultureInfo.InvariantCulture),
+                    deformation.OutputPositionMetres,
+                    component.PositionMetres);
+                AssertEqual(
+                    "independent target spall source material " + index.ToString(CultureInfo.InvariantCulture),
+                    targetProfile.ProfileId,
+                    component.SourceMaterialId);
+                AssertEqual(
+                    "independent target spall source collision " + index.ToString(CultureInfo.InvariantCulture),
+                    deformation.CollisionRecord.CollisionId,
+                    component.SourceCollisionId);
+                AssertTrue(
+                    "independent target spall id unique " + index.ToString(CultureInfo.InvariantCulture),
+                    ids.Add(component.ProjectileId));
+                AssertTrue(
+                    "independent target spall index unique " + index.ToString(CultureInfo.InvariantCulture),
+                    indices.Add(component.FragmentIndex));
+                massKilograms += component.RetainedMassKilograms;
+                energyJoules += component.TranslationalKineticEnergyJoules;
+            }
+
+            PhysicalProjectileState primary = RequireValue(
+                "independent target spall primary",
+                deformation.PrimaryState);
+            AssertNear("independent target spall mass closes", value.MassKilograms, massKilograms);
+            AssertNear("independent target spall energy closes", value.EnergyJoules, energyJoules);
+            AssertNear(
+                "target spall mass does not reduce projectile mass",
+                parent.RetainedMassKilograms,
+                primary.RetainedMassKilograms);
+            AssertNear(
+                "independent target spall closes system energy",
+                parent.TranslationalKineticEnergyJoules,
+                value.EffectiveLossBudget.TotalLossJoules
+                    + primary.TranslationalKineticEnergyJoules
+                    + value.EnergyJoules);
+            AssertNear(
+                "independent target spall conservation reports target mass",
+                value.MassKilograms,
+                value.ConservationResult.TargetSpallMassKilograms);
+
+            AssertTrue(
+                "independent target spall is deterministic",
+                PhysicalFragmentationSolver.TrySolveTargetSpall(
+                    spallInput,
+                    out PhysicalTargetSpallResponse? repeated,
+                    out reason));
+            PhysicalTargetSpallResponse repeatedValue = RequireValue(
+                "repeated independent target spall response",
+                repeated);
+            AssertEqual(
+                "independent target spall deterministic count",
+                value.Components.Count,
+                repeatedValue.Components.Count);
+            for (int index = 0; index < value.Components.Count; index++)
+            {
+                AssertPhysicalStateEquivalent(
+                    "independent target spall deterministic component "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    value.Components[index],
+                    repeatedValue.Components[index]);
+            }
+
+            CreateFragmentationScenario(
+                1000d,
+                "collision-fragmented-spall-owner",
+                out PhysicalProjectileState fragmentedParent,
+                out _,
+                out PhysicalTargetMaterialProfile fragmentedTarget,
+                out PhysicalDeformationResponse fragmentedDeformation);
+            var fragmentedInput = new PhysicalTargetSpallInput
+            {
+                Parent = fragmentedParent,
+                DeformationResponse = fragmentedDeformation,
+                TargetProfile = fragmentedTarget,
+                FragmentationProfile = fragmentationProfile,
+                TargetSpallIdPrefix = "fragmented-spall-owner"
+            };
+            AssertTrue(
+                "fragmentation solver retains ownership of fragmented target spall",
+                !PhysicalFragmentationSolver.TrySolveTargetSpall(
+                    fragmentedInput,
+                    out response,
+                    out reason));
+            AssertEqual(
+                "fragmented target spall ownership reason",
+                PhysicalTargetSpallFailureReason.FragmentationOutcomeOwnedByFragmentationSolver,
+                reason);
+
+            PhysicalFragmentationProfileInput noSpallProfileInput =
+                CreateTestFragmentationProfileInput();
+            noSpallProfileInput.TargetSpallEjectedMassFraction = 0d;
+            noSpallProfileInput.TargetSpallKineticEnergyFraction = 0d;
+            noSpallProfileInput.NominalTargetSpallMassKilograms = 0d;
+            noSpallProfileInput.MaximumTargetSpallCount = 0;
+            noSpallProfileInput.TargetSpallConeHalfAngleRadians = 0d;
+            noSpallProfileInput.MinimumTargetSpallAspectRatio = 0d;
+            noSpallProfileInput.MaximumTargetSpallAspectRatio = 0d;
+            noSpallProfileInput.MinimumTargetSpallDragCoefficient = 0d;
+            noSpallProfileInput.MaximumTargetSpallDragCoefficient = 0d;
+            noSpallProfileInput.TargetSpallPenetrationEfficiency = 0d;
+            AssertTrue(
+                "no-spall profile accepted",
+                PhysicalFragmentationProfile.TryCreate(
+                    noSpallProfileInput,
+                    out PhysicalFragmentationProfile? noSpallProfile,
+                    out _));
+            spallInput.FragmentationProfile = RequireValue(
+                "no-spall profile",
+                noSpallProfile);
+            AssertTrue(
+                "disabled target spall remains absent",
+                !PhysicalFragmentationSolver.TrySolveTargetSpall(
+                    spallInput,
+                    out response,
+                    out reason));
+            AssertEqual(
+                "disabled target spall reason",
+                PhysicalTargetSpallFailureReason.TargetSpallDisabled,
+                reason);
+        }
+
+        private static void ValidateTargetSpallContinuation()
+        {
+            CreateFragmentationScenario(
+                1400d,
+                "collision-spall-origin",
+                out PhysicalProjectileState originalProjectile,
+                out PhysicalProjectileMaterialProfile originalProjectileProfile,
+                out PhysicalTargetMaterialProfile originalTargetProfile,
+                out PhysicalDeformationResponse originalDeformation);
+            PhysicalFragmentationResponse originalResponse = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    originalProjectile,
+                    originalDeformation,
+                    originalProjectileProfile,
+                    originalTargetProfile,
+                    CreateTestFragmentationProfile(),
+                    2,
+                    "origin-projectile-fragment",
+                    "origin-target-spall"));
+            AssertTrue("origin collision emits target spall", originalResponse.TargetSpall.Count > 0);
+            PhysicalProjectileState spallParent = originalResponse.TargetSpall[0];
+
+            PhysicalProjectileMaterialProfile? spallProfile;
+            AssertTrue(
+                "target spall resolves its own material profile",
+                PhysicalDefaultProfileCatalog.TryGetSpallProjectileProfile(
+                    spallParent.SourceMaterialClass,
+                    out spallProfile));
+            PhysicalProjectileMaterialProfile spallProfileValue = RequireValue(
+                "target spall material profile",
+                spallProfile);
+            AssertEqual(
+                "target spall profile construction",
+                PhysicalProjectileConstruction.TargetMaterial,
+                spallProfileValue.Construction);
+
+            PhysicalTargetMaterialProfile? secondTargetProfile;
+            PhysicalFragmentationProfile? secondFragmentationProfile;
+            AssertTrue(
+                "second target profile resolves",
+                PhysicalDefaultProfileCatalog.TryGetTargetProfile(
+                    PhysicalMaterialClass.Glass,
+                    out secondTargetProfile));
+            AssertTrue(
+                "second target fragmentation profile resolves",
+                PhysicalDefaultProfileCatalog.TryGetFragmentationProfile(
+                    PhysicalMaterialClass.Glass,
+                    out secondFragmentationProfile));
+            PhysicalTargetMaterialProfile secondTarget = RequireValue(
+                "second target material profile",
+                secondTargetProfile);
+            PhysicalFragmentationProfile secondFragmentation = RequireValue(
+                "second target fragmentation profile",
+                secondFragmentationProfile);
+
+            var secondDeformationInput = new PhysicalDeformationInput
+            {
+                Parent = spallParent,
+                ProjectileProfile = spallProfileValue,
+                TargetProfile = secondTarget,
+                CollisionId = "collision-spall-second-impact",
+                OutputProjectileId = spallParent.ProjectileId,
+                ImpactPositionMetres = spallParent.PositionMetres.Add(
+                    new PhysicalVector3(0d, 0d, 0.5d)),
+                SurfaceNormal = new PhysicalVector3(0d, 0d, -1d),
+                PhysicalThicknessMetres = 0.0005d,
+                EffectivePathLengthMetres = 0.0005d,
+                ObservedOutcome = PhysicalCollisionOutcome.Fragmented,
+                ObservedOutgoingDirection = new PhysicalVector3(0d, 0d, 1d),
+                OutgoingOrientation = PhysicalOrientation.Identity
+            };
+            PhysicalDeformationResponse secondDeformation = SolveDeformationOrThrow(
+                secondDeformationInput);
+            PhysicalProjectileState secondPrimary = RequireValue(
+                "target spall second-impact primary",
+                secondDeformation.PrimaryState);
+            AssertEqual(
+                "target spall primary receives parent-derived kind",
+                PhysicalProjectileKind.TargetSpallFragment,
+                secondPrimary.Kind);
+            AssertEqual(
+                "target spall primary preserves material construction",
+                PhysicalProjectileConstruction.TargetMaterial,
+                secondPrimary.Construction);
+            AssertEqual(
+                "target spall primary preserves origin material",
+                spallParent.SourceMaterialClass,
+                secondPrimary.SourceMaterialClass);
+            AssertEqual(
+                "target spall primary appends second collision",
+                secondDeformation.CollisionRecord,
+                secondPrimary.CollisionHistory[secondPrimary.CollisionHistory.Count - 1]);
+
+            PhysicalFragmentationResponse secondResponse = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    spallParent,
+                    secondDeformation,
+                    spallProfileValue,
+                    secondTarget,
+                    secondFragmentation,
+                    2,
+                    "secondary-spall-fragment",
+                    "second-target-spall"));
+            AssertTrue(
+                "target spall emits independently simulated child fragments",
+                secondResponse.ProjectileFragments.Count > 0);
+            double derivedMassKilograms = 0d;
+            for (int index = 0; index < secondResponse.ProjectileFragments.Count; index++)
+            {
+                PhysicalProjectileState fragment = secondResponse.ProjectileFragments[index];
+                AssertEqual(
+                    "target spall child kind " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileKind.TargetSpallFragment,
+                    fragment.Kind);
+                AssertEqual(
+                    "target spall child construction " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileConstruction.TargetMaterial,
+                    fragment.Construction);
+                AssertTrue(
+                    "target spall child preserves target-material origin "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    fragment.IsTargetMaterialOrigin);
+                AssertTrue(
+                    "target spall child consumes immediate-parent mass "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    fragment.IsParentDerivedMass);
+                AssertTrue(
+                    "target spall child shape " + index.ToString(CultureInfo.InvariantCulture),
+                    fragment.ShapeClass == PhysicalProjectileShapeClass.TargetSpallFlake
+                        || fragment.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk);
+                AssertEqual(
+                    "target spall child preserves origin material "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    spallParent.SourceMaterialClass,
+                    fragment.SourceMaterialClass);
+                AssertEqual(
+                    "target spall child records current collision "
+                        + index.ToString(CultureInfo.InvariantCulture),
+                    secondDeformation.CollisionRecord.CollisionId,
+                    fragment.SourceCollisionId);
+                derivedMassKilograms += fragment.RetainedMassKilograms;
+            }
+
+            AssertNear(
+                "target spall child mass closes current parent reservation",
+                secondDeformation.AvailableFragmentMassKilograms,
+                derivedMassKilograms);
+            AssertTrue(
+                "second hard target emits separately classified new spall",
+                secondResponse.TargetSpall.Count > 0);
+            for (int index = 0; index < secondResponse.TargetSpall.Count; index++)
+            {
+                PhysicalProjectileState newSpall = secondResponse.TargetSpall[index];
+                AssertEqual(
+                    "second target new spall kind " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileKind.TargetSpall,
+                    newSpall.Kind);
+                AssertEqual(
+                    "second target new spall material " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalMaterialClass.Glass,
+                    newSpall.SourceMaterialClass);
+            }
         }
 
         private static void ValidatePhysicalFragmentationMinimumOutput()
@@ -1914,6 +2327,79 @@ namespace BallisticPenetration.Validation
             AssertEqual("no-spall profile emits no target components", 0, noSpallResponse.TargetSpall.Count);
             AssertNear("no-spall profile target mass", 0d, noSpallResponse.TargetSpallMassKilograms);
             AssertNear("no-spall profile target energy", 0d, noSpallResponse.TargetSpallEnergyJoules);
+        }
+
+        private static void ValidatePhysicalDefaultProfileCatalog()
+        {
+            for (PhysicalProjectileConstruction construction = PhysicalProjectileConstruction.LeadCoreJacketed;
+                construction < PhysicalProjectileConstruction.TargetMaterial;
+                construction++)
+            {
+                PhysicalProjectileMaterialProfile? projectileProfile;
+                AssertTrue(
+                    "built-in projectile profile " + construction,
+                    PhysicalDefaultProfileCatalog.TryGetProjectileProfile(
+                        construction,
+                        out projectileProfile));
+                AssertTrue(
+                    "built-in projectile profile value " + construction,
+                    projectileProfile != null);
+                AssertEqual(
+                    "built-in projectile profile construction " + construction,
+                    construction,
+                    RequireValue("built-in projectile profile", projectileProfile).Construction);
+                AssertTrue(
+                    "built-in projectile drag " + construction,
+                    PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(construction) > 0d);
+            }
+
+            for (PhysicalMaterialClass materialClass = PhysicalMaterialClass.SoftTissue;
+                materialClass <= PhysicalMaterialClass.Other;
+                materialClass++)
+            {
+                PhysicalTargetMaterialProfile? targetProfile;
+                PhysicalProjectileMaterialProfile? spallProjectileProfile;
+                PhysicalFragmentationProfile? fragmentationProfile;
+                AssertTrue(
+                    "built-in target profile " + materialClass,
+                    PhysicalDefaultProfileCatalog.TryGetTargetProfile(
+                        materialClass,
+                        out targetProfile));
+                AssertTrue(
+                    "built-in target profile value " + materialClass,
+                    targetProfile != null);
+                AssertEqual(
+                    "built-in target profile class " + materialClass,
+                    materialClass,
+                    RequireValue("built-in target profile", targetProfile).MaterialClass);
+                AssertTrue(
+                    "built-in target-spall projectile profile " + materialClass,
+                    PhysicalDefaultProfileCatalog.TryGetSpallProjectileProfile(
+                        materialClass,
+                        out spallProjectileProfile));
+                AssertEqual(
+                    "built-in target-spall construction " + materialClass,
+                    PhysicalProjectileConstruction.TargetMaterial,
+                    RequireValue(
+                        "built-in target-spall projectile profile",
+                        spallProjectileProfile).Construction);
+                AssertTrue(
+                    "built-in fragmentation profile " + materialClass,
+                    PhysicalDefaultProfileCatalog.TryGetFragmentationProfile(
+                        materialClass,
+                        out fragmentationProfile));
+                AssertTrue(
+                    "built-in fragmentation profile value " + materialClass,
+                    fragmentationProfile != null);
+            }
+
+            PhysicalTargetMaterialProfile? airProfile;
+            AssertTrue(
+                "air has no collision material profile",
+                !PhysicalDefaultProfileCatalog.TryGetTargetProfile(
+                    PhysicalMaterialClass.Air,
+                    out airProfile));
+            AssertTrue("air profile remains null", airProfile == null);
         }
 
         private static void ValidatePhysicalRootProjectileFactory()
@@ -2360,7 +2846,7 @@ namespace BallisticPenetration.Validation
                 AssertNear(
                     "property fragmentation mass closure " + caseName,
                     parent.RetainedMassKilograms,
-                    response.ConservationResult.AllocatedProjectileMassKilograms);
+                    response.ConservationResult.AllocatedParentMassKilograms);
                 AssertNear(
                     "property fragmentation energy closure " + caseName,
                     parent.TranslationalKineticEnergyJoules,
@@ -2631,6 +3117,10 @@ namespace BallisticPenetration.Validation
                 name + " source collision",
                 deformation.CollisionRecord.CollisionId,
                 state.SourceCollisionId);
+            AssertEqual(
+                name + " starts at deformation output face",
+                deformation.OutputPositionMetres,
+                state.PositionMetres);
             AssertEqual(
                 name + " fragment generation",
                 parent.FragmentGeneration + 1,
@@ -3013,7 +3503,8 @@ namespace BallisticPenetration.Validation
             double massKilograms,
             double speedMetresPerSecond)
         {
-            bool isSpall = kind == PhysicalProjectileKind.TargetSpall;
+            bool isSpall = kind == PhysicalProjectileKind.TargetSpall
+                || kind == PhysicalProjectileKind.TargetSpallFragment;
             double diameterMetres = isSpall ? 0.004d : 0.003d;
             double area;
             if (!PhysicalProjectileGeometry.TryCalculateCircularAreaSquareMetres(diameterMetres, out area))

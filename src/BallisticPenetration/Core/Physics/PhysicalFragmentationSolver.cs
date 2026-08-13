@@ -398,6 +398,83 @@ namespace BallisticPenetration.Core.Physics
         public double TargetSpallEnergyJoules { get; }
     }
 
+    public enum PhysicalTargetSpallFailureReason
+    {
+        None = 0,
+        InputMissing = 1,
+        ParentMissing = 2,
+        DeformationResponseMissing = 3,
+        TargetProfileMissing = 4,
+        FragmentationProfileMissing = 5,
+        TargetSpallDisabled = 6,
+        NonPenetratingOutcome = 7,
+        FragmentationOutcomeOwnedByFragmentationSolver = 8,
+        DeformationResponseMismatch = 9,
+        TargetProfileMismatch = 10,
+        TargetSpallIdPrefixMissing = 11,
+        DirectionInvalid = 12,
+        TargetSpallReservationInvalid = 13,
+        EffectiveLossBudgetInvalid = 14,
+        TargetSpallStateInvalid = 15,
+        ConservationValidationFailed = 16,
+        FragmentGenerationOverflow = 17
+    }
+
+    public sealed class PhysicalTargetSpallInput
+    {
+        public PhysicalProjectileState? Parent { get; set; }
+
+        public PhysicalDeformationResponse? DeformationResponse { get; set; }
+
+        public PhysicalTargetMaterialProfile? TargetProfile { get; set; }
+
+        public PhysicalFragmentationProfile? FragmentationProfile { get; set; }
+
+        public string? TargetSpallIdPrefix { get; set; }
+    }
+
+    /// <summary>
+    /// Target material ejected by a nonfragmenting penetration. Its mass is never charged to the
+    /// projectile; its kinetic energy is reclassified from work already spent on the target.
+    /// </summary>
+    public sealed class PhysicalTargetSpallResponse
+    {
+        private readonly ReadOnlyCollection<PhysicalProjectileState> _components;
+
+        internal PhysicalTargetSpallResponse(
+            IReadOnlyList<PhysicalProjectileState> components,
+            PhysicalLossBudget effectiveLossBudget,
+            PhysicalConservationResult conservationResult,
+            double massKilograms,
+            double energyJoules)
+        {
+            var copy = new PhysicalProjectileState[components.Count];
+            for (int index = 0; index < copy.Length; index++)
+            {
+                copy[index] = components[index];
+            }
+
+            _components = Array.AsReadOnly(copy);
+            EffectiveLossBudget = effectiveLossBudget;
+            ConservationResult = conservationResult;
+            MassKilograms = massKilograms;
+            EnergyJoules = energyJoules;
+        }
+
+        public IReadOnlyList<PhysicalProjectileState> Components
+        {
+            get { return _components; }
+        }
+
+        public PhysicalLossBudget EffectiveLossBudget { get; }
+
+        public PhysicalConservationResult ConservationResult { get; }
+
+        public double MassKilograms { get; }
+
+        public double EnergyJoules { get; }
+    }
+
     /// <summary>
     /// Deterministically resolves mass, energy, geometry, and trajectory only after the host has
     /// confirmed fragmentation. It consumes the host count and never calls host decision or random
@@ -724,6 +801,219 @@ namespace BallisticPenetration.Core.Physics
             return true;
         }
 
+        public static bool TrySolveTargetSpall(
+            PhysicalTargetSpallInput? input,
+            out PhysicalTargetSpallResponse? response,
+            out PhysicalTargetSpallFailureReason failureReason)
+        {
+            response = null;
+            if (input == null)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.InputMissing;
+                return false;
+            }
+
+            PhysicalProjectileState? parent = input.Parent;
+            if (parent == null)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.ParentMissing;
+                return false;
+            }
+
+            PhysicalDeformationResponse? deformation = input.DeformationResponse;
+            if (deformation == null)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.DeformationResponseMissing;
+                return false;
+            }
+
+            PhysicalTargetMaterialProfile? targetProfile = input.TargetProfile;
+            if (targetProfile == null)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.TargetProfileMissing;
+                return false;
+            }
+
+            PhysicalFragmentationProfile? fragmentationProfile = input.FragmentationProfile;
+            if (fragmentationProfile == null)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.FragmentationProfileMissing;
+                return false;
+            }
+
+            if (!fragmentationProfile.ProducesTargetSpall)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.TargetSpallDisabled;
+                return false;
+            }
+
+            if (deformation.CollisionRecord.Outcome == PhysicalCollisionOutcome.Fragmented
+                || deformation.RequiresFragmentation)
+            {
+                failureReason =
+                    PhysicalTargetSpallFailureReason.FragmentationOutcomeOwnedByFragmentationSolver;
+                return false;
+            }
+
+            if (deformation.CollisionRecord.Outcome != PhysicalCollisionOutcome.Penetrated
+                && deformation.CollisionRecord.Outcome != PhysicalCollisionOutcome.Deviated)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.NonPenetratingOutcome;
+                return false;
+            }
+
+            if (parent.FragmentGeneration == int.MaxValue)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.FragmentGenerationOverflow;
+                return false;
+            }
+
+            if (!string.Equals(
+                    deformation.CollisionRecord.MaterialId,
+                    targetProfile.ProfileId,
+                    StringComparison.Ordinal)
+                || deformation.CollisionRecord.MaterialClass != targetProfile.MaterialClass)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.TargetProfileMismatch;
+                return false;
+            }
+
+            if (!PhysicalProjectileConservation.TryValidateDeformationResponse(
+                    parent,
+                    deformation.PrimaryState,
+                    deformation.CollisionRecord,
+                    deformation.AvailableFragmentMassKilograms,
+                    deformation.AvailableFragmentEnergyJoules,
+                    deformation.LossBudget,
+                    out _,
+                    out _))
+            {
+                failureReason = PhysicalTargetSpallFailureReason.DeformationResponseMismatch;
+                return false;
+            }
+
+            string? targetSpallIdPrefix = input.TargetSpallIdPrefix;
+            if (string.IsNullOrWhiteSpace(targetSpallIdPrefix))
+            {
+                failureReason = PhysicalTargetSpallFailureReason.TargetSpallIdPrefixMissing;
+                return false;
+            }
+
+            PhysicalVector3 spallDrive = deformation.OutgoingDirection.Scale(0.75d)
+                .Add(deformation.SurfaceNormal.Negate().Scale(0.25d));
+            if (!spallDrive.TryNormalize(out PhysicalVector3 spallAxis))
+            {
+                failureReason = PhysicalTargetSpallFailureReason.DirectionInvalid;
+                return false;
+            }
+
+            double availableTargetMassKilograms = deformation.SweptVolumeCubicMetres
+                * targetProfile.DensityKilogramsPerCubicMetre;
+            double targetSpallMassKilograms = availableTargetMassKilograms
+                * fragmentationProfile.TargetSpallEjectedMassFraction;
+            double targetSpallEnergyJoules = deformation.LossBudget.PenetrationLossJoules
+                * fragmentationProfile.TargetSpallKineticEnergyFraction;
+            if (!IsFinitePositive(targetSpallMassKilograms)
+                || !IsFinitePositive(targetSpallEnergyJoules)
+                || targetSpallEnergyJoules > deformation.LossBudget.PenetrationLossJoules)
+            {
+                failureReason = PhysicalTargetSpallFailureReason.TargetSpallReservationInvalid;
+                return false;
+            }
+
+            var effectiveLossBudget = new PhysicalLossBudget(
+                deformation.LossBudget.PenetrationLossJoules - targetSpallEnergyJoules,
+                deformation.LossBudget.DeformationLossJoules,
+                deformation.LossBudget.FractureLossJoules,
+                deformation.LossBudget.HeatLossJoules,
+                deformation.LossBudget.OtherLossJoules);
+            if (!effectiveLossBudget.IsValid(out _))
+            {
+                failureReason = PhysicalTargetSpallFailureReason.EffectiveLossBudgetInvalid;
+                return false;
+            }
+
+            double targetSpallCountValue = Math.Ceiling(
+                targetSpallMassKilograms
+                    / fragmentationProfile.NominalTargetSpallMassKilograms);
+            int targetSpallCount = targetSpallCountValue
+                    >= fragmentationProfile.MaximumTargetSpallCount
+                ? fragmentationProfile.MaximumTargetSpallCount
+                : Math.Max(1, (int)targetSpallCountValue);
+            ulong collisionSeed = StableHash64(deformation.CollisionRecord.CollisionId);
+            ulong componentSeed = parent.DeterministicSeed
+                ^ collisionSeed
+                ^ unchecked((ulong)(parent.FragmentGeneration + 1));
+            var spallRandom = new DeterministicProjectileRandom(
+                componentSeed ^ StableHash64(targetProfile.ProfileId),
+                TargetSpallStream);
+            double[] spallMasses = PartitionMass(
+                targetSpallMassKilograms,
+                targetSpallCount,
+                0d,
+                spallRandom);
+            double[] spallEnergies = PartitionEnergy(
+                targetSpallEnergyJoules,
+                spallMasses,
+                spallRandom);
+            var targetSpall = new List<PhysicalProjectileState>(targetSpallCount);
+            for (int index = 0; index < targetSpallCount; index++)
+            {
+                if (!TryCreateTargetSpall(
+                        parent,
+                        deformation,
+                        targetProfile,
+                        fragmentationProfile,
+                        targetSpallIdPrefix,
+                        index,
+                        spallMasses[index],
+                        spallEnergies[index],
+                        spallAxis,
+                        spallRandom,
+                        out PhysicalProjectileState? component)
+                    || component == null)
+                {
+                    failureReason = PhysicalTargetSpallFailureReason.TargetSpallStateInvalid;
+                    return false;
+                }
+
+                targetSpall.Add(component);
+            }
+
+            var nullableComponents = new List<PhysicalProjectileState?>(targetSpall.Count);
+            for (int index = 0; index < targetSpall.Count; index++)
+            {
+                nullableComponents.Add(targetSpall[index]);
+            }
+
+            if (!PhysicalProjectileConservation.TryValidateFragmentationResolution(
+                    parent,
+                    deformation.PrimaryState,
+                    deformation.CollisionRecord,
+                    nullableComponents,
+                    0d,
+                    0d,
+                    targetSpallMassKilograms,
+                    targetSpallEnergyJoules,
+                    deformation.LossBudget,
+                    effectiveLossBudget,
+                    out PhysicalConservationResult conservationResult,
+                    out _))
+            {
+                failureReason = PhysicalTargetSpallFailureReason.ConservationValidationFailed;
+                return false;
+            }
+
+            response = new PhysicalTargetSpallResponse(
+                targetSpall,
+                effectiveLossBudget,
+                conservationResult,
+                targetSpallMassKilograms,
+                targetSpallEnergyJoules);
+            failureReason = PhysicalTargetSpallFailureReason.None;
+            return true;
+        }
+
         private static bool TryCreateProjectileFragment(
             PhysicalProjectileState parent,
             PhysicalDeformationResponse deformation,
@@ -797,15 +1087,25 @@ namespace BallisticPenetration.Core.Physics
             double damageCapability = Math.Min(
                 energyJoules,
                 energyJoules * parentDamageFraction);
+            bool fragmentsTargetMaterial = parent.Construction
+                == PhysicalProjectileConstruction.TargetMaterial;
+            PhysicalProjectileKind componentKind = fragmentsTargetMaterial
+                ? PhysicalProjectileKind.TargetSpallFragment
+                : PhysicalProjectileKind.ProjectileFragment;
+            PhysicalProjectileShapeClass componentShape = fragmentsTargetMaterial
+                ? (lengthMetres / diameterMetres < 0.75d
+                    ? PhysicalProjectileShapeClass.TargetSpallFlake
+                    : PhysicalProjectileShapeClass.TargetSpallChunk)
+                : PhysicalProjectileShapeClass.IrregularProjectileFragment;
             return TryCreateSecondaryState(
                 parent,
                 deformation,
-                PhysicalProjectileKind.ProjectileFragment,
+                componentKind,
                 projectileIdPrefix + "-" + fragmentIndex.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 fragmentIndex,
                 CombineSeed(parent.DeterministicSeed, random.NextUInt32(), random.NextUInt32()),
                 parent.Construction,
-                PhysicalProjectileShapeClass.IrregularProjectileFragment,
+                componentShape,
                 massKilograms,
                 diameterMetres,
                 projectedAreaSquareMetres,
@@ -952,6 +1252,8 @@ namespace BallisticPenetration.Core.Physics
             PhysicalCollisionRecord[] history = CreateInheritedHistory(
                 parent,
                 deformation.CollisionRecord);
+            bool preservesTargetMaterialOrigin = kind
+                == PhysicalProjectileKind.TargetSpallFragment;
             var stateInput = new PhysicalProjectileStateInput
             {
                 Kind = kind,
@@ -959,8 +1261,12 @@ namespace BallisticPenetration.Core.Physics
                 RootShotId = parent.RootShotId,
                 ParentProjectileId = parent.ProjectileId,
                 SourceProjectileId = parent.ProjectileId,
-                SourceMaterialId = deformation.CollisionRecord.MaterialId,
-                SourceMaterialClass = deformation.CollisionRecord.MaterialClass,
+                SourceMaterialId = preservesTargetMaterialOrigin
+                    ? parent.SourceMaterialId
+                    : deformation.CollisionRecord.MaterialId,
+                SourceMaterialClass = preservesTargetMaterialOrigin
+                    ? parent.SourceMaterialClass
+                    : deformation.CollisionRecord.MaterialClass,
                 SourceCollisionId = deformation.CollisionRecord.CollisionId,
                 FragmentIndex = fragmentIndex,
                 FragmentGeneration = parent.FragmentGeneration + 1,
@@ -974,7 +1280,7 @@ namespace BallisticPenetration.Core.Physics
                 ProjectedAreaSquareMetres = projectedAreaSquareMetres,
                 LengthMetres = lengthMetres,
                 DragCoefficient = dragCoefficient,
-                PositionMetres = deformation.CollisionRecord.PositionMetres,
+                PositionMetres = deformation.OutputPositionMetres,
                 VelocityMetresPerSecond = velocity,
                 Orientation = orientation,
                 YawAngleRadians = yawAngleRadians,

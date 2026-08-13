@@ -281,9 +281,26 @@ namespace BallisticPenetration.Core.Physics
             get { return _collisionHistory; }
         }
 
-        public bool IsProjectileDerivedMass
+        /// <summary>
+        /// True when this component's material came from the struck target rather than the
+        /// ammunition projectile. This remains true when a spall component fragments again.
+        /// </summary>
+        public bool IsTargetMaterialOrigin
         {
-            get { return Kind != PhysicalProjectileKind.TargetSpall; }
+            get { return Construction == PhysicalProjectileConstruction.TargetMaterial; }
+        }
+
+        /// <summary>
+        /// True when this output consumes retained mass from its immediate parent. Fresh target
+        /// spall is excluded because its mass is supplied by the current target instead.
+        /// </summary>
+        public bool IsParentDerivedMass
+        {
+            get
+            {
+                return !string.IsNullOrWhiteSpace(ParentProjectileId)
+                    && Kind != PhysicalProjectileKind.TargetSpall;
+            }
         }
 
         public static bool TryCreate(
@@ -299,7 +316,7 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (input.Kind < PhysicalProjectileKind.IntactProjectile
-                || input.Kind > PhysicalProjectileKind.TargetSpall)
+                || input.Kind > PhysicalProjectileKind.TargetSpallFragment)
             {
                 failureReason = PhysicalProjectileStateFailureReason.ProjectileKindInvalid;
                 return false;
@@ -333,14 +350,15 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            bool isTargetSpall = input.Kind == PhysicalProjectileKind.TargetSpall;
+            bool isTargetMaterialFragment = input.Kind == PhysicalProjectileKind.TargetSpall
+                || input.Kind == PhysicalProjectileKind.TargetSpallFragment;
             bool hasTargetMaterialConstruction = input.Construction
                 == PhysicalProjectileConstruction.TargetMaterial;
             bool hasTargetSpallShape = input.ShapeClass
                 == PhysicalProjectileShapeClass.TargetSpallFlake
                 || input.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk;
-            if (isTargetSpall != hasTargetMaterialConstruction
-                || isTargetSpall != hasTargetSpallShape)
+            if (isTargetMaterialFragment != hasTargetMaterialConstruction
+                || isTargetMaterialFragment != hasTargetSpallShape)
             {
                 failureReason = PhysicalProjectileStateFailureReason.MaterialOriginMismatch;
                 return false;
@@ -483,7 +501,8 @@ namespace BallisticPenetration.Core.Physics
                 if (input.FragmentGeneration != 0
                     || input.FragmentIndex != -1
                     || input.Kind == PhysicalProjectileKind.ProjectileFragment
-                    || input.Kind == PhysicalProjectileKind.TargetSpall)
+                    || input.Kind == PhysicalProjectileKind.TargetSpall
+                    || input.Kind == PhysicalProjectileKind.TargetSpallFragment)
                 {
                     failureReason = PhysicalProjectileStateFailureReason.RootLineageInvalid;
                     return false;

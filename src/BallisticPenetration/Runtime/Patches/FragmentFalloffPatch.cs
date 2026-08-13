@@ -38,8 +38,11 @@ namespace BallisticPenetration.Runtime.Patches
             "Design",
             "CA1031:Do not catch general exception types",
             Justification = "The Harmony prefix must preserve vanilla values for every host or compatibility failure.")]
-        private static void Prefix(Shot __instance)
+        private static void Prefix(
+            Shot __instance,
+            out PhysicalRuntimeCollisionState? __state)
         {
+            __state = null;
             CollisionContext? context = null;
             float impactSpeed = 0f;
             BallisticFalloffFactors diagnosticFactors = BallisticFalloffFactors.NeutralFallback;
@@ -77,6 +80,31 @@ namespace BallisticPenetration.Runtime.Patches
                 {
                     RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
                     return;
+                }
+
+                if (configuration.EnableExperimentalPhysicalProjectiles.Value)
+                {
+                    PhysicalBoundFlightResult physicalResult =
+                        PhysicalProjectileRuntime.TryApplyBoundFlight(
+                            __instance,
+                            out PhysicalRuntimeCollisionState? physicalState,
+                            out diagnosticFactors);
+                    if (physicalResult == PhysicalBoundFlightResult.Rejected)
+                    {
+                        context.AdjustmentResult = CollisionAdjustmentResult.CalculationFailed;
+                        RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                        return;
+                    }
+
+                    if (physicalResult == PhysicalBoundFlightResult.Applied)
+                    {
+                        __state = physicalState;
+                        context.LocalOutputDamage = __instance.Damage;
+                        context.LocalOutputPenetrationPower = __instance.PenetrationPower;
+                        context.AdjustmentResult = CollisionAdjustmentResult.Applied;
+                        RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                        return;
+                    }
                 }
 
                 double penetrationExponent;
@@ -131,6 +159,13 @@ namespace BallisticPenetration.Runtime.Patches
                 context.LocalOutputPenetrationPower = penetrationPower;
                 context.AdjustmentResult = CollisionAdjustmentResult.Applied;
 
+                if (configuration.EnableExperimentalPhysicalProjectiles.Value)
+                {
+                    PhysicalProjectileRuntime.TryPrepareRootCollision(
+                        __instance,
+                        out __state);
+                }
+
                 // Record the values written by this patch.
                 RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
 
@@ -157,6 +192,36 @@ namespace BallisticPenetration.Runtime.Patches
                 }
 
                 Plugin.LogHookFailure("CreateFragments falloff prefix", exception);
+            }
+        }
+
+        [PatchPostfix]
+        [HarmonyPriority(Priority.Last)]
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "The Harmony postfix must retain EFT's original child list for every experimental bridge failure.")]
+        private static void Postfix(
+            Shot __instance,
+            PhysicalRuntimeCollisionState? __state)
+        {
+            try
+            {
+                PluginConfiguration? configuration = Plugin.Configuration;
+                if (__instance == null
+                    || __state == null
+                    || configuration == null
+                    || !configuration.Enabled.Value
+                    || !configuration.EnableExperimentalPhysicalProjectiles.Value)
+                {
+                    return;
+                }
+
+                PhysicalProjectileRuntime.TryApplyObservedOutcome(__instance, __state);
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogHookFailure("CreateFragments physical postfix", exception);
             }
         }
 

@@ -35,6 +35,10 @@
       <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- BepInEx.BaseUnityPlugin exposes UnityEngine.MonoBehaviour in its public base type. -->
     <Reference Include="UnityEngine">
       <HintPath>$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.dll</HintPath>
@@ -48,6 +52,7 @@
     <Error Condition="!Exists('$(SptRoot)\BepInEx\plugins\spt\spt-reflection.dll')" Text="spt-reflection.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
     <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll')" Text="Assembly-CSharp.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
     <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll was not found. Set SptRoot to a compatible SPT client directory. Current SptRoot: $(SptRoot)" />
+    <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.PhysicsModule.dll')" Text="UnityEngine.PhysicsModule.dll was not found. It is required to measure the exact struck collider path. Current SptRoot: $(SptRoot)" />
     <Error Condition="!Exists('$(SptRoot)\EscapeFromTarkov_Data\Managed\UnityEngine.dll')" Text="UnityEngine.dll was not found. It is required only to compile against BepInEx.BaseUnityPlugin. Current SptRoot: $(SptRoot)" />
   </Target>
 

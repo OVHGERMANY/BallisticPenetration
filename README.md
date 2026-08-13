@@ -69,9 +69,12 @@ is added after death.
 
 ## Scope
 
-The plugin does not modify flight drag, trajectory integration, ricochet angle/RNG,
-armor resistance formulas, armor durability formulas, or visual effects. Postmortem
-armor wear calls the existing EFT durability method without changing its calculations.
+The normal falloff path does not modify flight drag, trajectory integration, ricochet
+angle/RNG, armor resistance formulas, armor durability formulas, or visual effects.
+Postmortem armor wear calls the existing EFT durability method without changing its
+calculations. The disabled-by-default physical-projectile path supplies component-specific
+mass, diameter, drag, velocity, damage, and penetration to EFT child shots while retaining
+EFT's trajectory integrator and observed collision decisions.
 
 Armor block and penetration outcomes can change because the existing armor calculation
 reads the corrected `PenetrationPower`. That is the intended gameplay effect. The
@@ -85,11 +88,13 @@ spall. It records component-specific SI values for mass, geometry, projected are
 position, velocity, momentum, kinetic energy, orientation, yaw, terminal state, lineage,
 and collision history.
 
-Projectile-derived mass and target spall are separate categories. Transition validation
-rejects projectile-mass over-allocation, child energy above the residual collision budget,
-mixed parent/root/collision lineage, duplicate component identities, non-finite state, and
-fragmentation events with no physical projectile fragment. A fixed PCG random stream is
-provided for later deformation and fragmentation calculations.
+Mass retained from the immediate parent and fresh target spall are separate categories.
+Every component also records whether its material originated in the ammunition or the
+struck target, including target-spall fragments created at a later collision. Transition
+validation rejects parent-mass over-allocation, child energy above the residual collision
+budget, mixed parent/root/collision lineage, duplicate component identities, non-finite
+state, and fragmentation events with no physical parent fragment. A fixed PCG random
+stream is provided for later deformation and fragmentation calculations.
 
 The development tree also contains a deterministic deformation and material-response
 solver. It accepts construction-specific projectile properties, target resistance
@@ -104,11 +109,13 @@ Every response must close projectile mass and translational energy. A continuing
 deformed component keeps its physical identity and immutable prior collision records. A confirmed
 fragmentation response partitions its reserved projectile mass and energy into a retained primary
 component and deterministic projectile fragments. Target-generated spall is constructed separately
-from target mass and penetration-work energy, so it is never counted as projectile mass. Every
-output has independent geometry, projected area, drag, direction, velocity, momentum, energy,
+from target mass and penetration-work energy, so it never consumes mass retained by the
+immediate parent. Every output has independent geometry, projected area, drag, direction,
+velocity, momentum, energy,
 physical capability, source, lineage, history, and render state. A host-reported zero fragment
 count remains observable and produces the minimum one physical projectile component needed to
-close a nonzero fragmentation reservation.
+close a nonzero fragmentation reservation. On hard materials, a confirmed penetration or
+deviation can also eject target spall when the projectile itself did not fragment.
 
 The development tree also contains the checked boundary for individual flight. A pure projector
 converts each physical component into EFT mass, equivalent diameter, velocity, relative G1 drag,
@@ -119,18 +126,27 @@ integrator. Root state construction derives area, equivalent length, orientation
 capability from measured shot values. The runtime binding rejects stale state if EFT recycles the
 same pooled `Shot` object for another projectile.
 
-Only synthetic test profiles are present today. No construction or target profile is yet
-mapped to live ammunition, armor, bodies, or world materials, and target density is reserved
-for the later spall calculation. Physical thickness is recorded separately from the supplied
-effective material path; thickness alone does not secretly alter work unless the measured
-path changes.
+The runtime has conservative development profiles for projectile construction and EFT world,
+body, and armor material classes. These are deterministic engineering estimates derived from
+the limited fields exposed by EFT; they are not manufacturer metallurgy or certification data.
+The exact struck collider is measured from the entry hit to its far face. Physical thickness
+normal to the surface remains separate from the actual oblique path through material.
 
-The physical-state, deformation, fragmentation, projection, and flight core is not attached to EFT
-shots and therefore does not change live gameplay in version `1.2.0`. Assembly metadata and managed
-IL verify the intended integration seam: an outer `Shot.CreateFragments` postfix runs after EFT
-constructs its one real child list but before `BallisticsCalculator.UpdateShots` schedules those
-children. Runtime state binding, collider-path measurement, transactional child replacement, and
-trajectory reinitialization remain the next stage.
+The physical path is attached to `Shot.CreateFragments` behind `Experimental / Enable Physical
+Projectiles`, which defaults to `false`. It reads EFT's already-selected stop, penetration,
+deviation, ricochet, or fragmentation outcome and never invokes those decision methods again.
+For an accepted collision it replaces EFT's child list only after every physical state,
+projection, child shot, trajectory, armor-CF application, and pool-safe binding succeeds.
+Penetrating components begin their next flight at the measured far face; ricochets and stopped
+components remain at the impact face. Projectile fragments and target spall retain independent
+mass, shape, cross-section, drag, velocity, energy, damage, penetration, lineage, and subsequent
+collision state. Target spall can itself deform and fragment at a later target without being
+reclassified as bullet mass.
+
+This runtime path has passed offline compiler, invariant, conservation, deterministic, and full
+ammunition-database tests. It has not completed manual in-game acceptance and remains experimental.
+No custom bullet or fragment mesh renderer is present yet; EFT simulates the projected child shots,
+but the post-impact component shapes are not yet drawn as dedicated geometry.
 
 ## Configuration
 
@@ -144,6 +160,7 @@ Available settings:
 
 - `General / Enabled` (default `true`)
 - `General / Damage Armor On Corpses` (default `true`)
+- `Experimental / Enable Physical Projectiles` (default `false`)
 - `Falloff / Penetration Exponent` (default `1.4`, range `0.1` through `4.0`)
 - `Falloff / Damage Exponent` (default `0.4`, range `0.1` through `4.0`)
 - `Diagnostics / Log Adjustments` (default `false`)
@@ -183,15 +200,17 @@ collision history, SI-derived values, immutable state-revision lineage, fail-ope
 projectile/spall separation, mass and energy conservation, deterministic random output,
 material-profile validation, deformation and obliquity response, stopped-energy closure,
 component-specific fragmentation and target-spall construction, physical-to-EFT projection,
-measured-flight reconciliation, and fragment-budget closure; the SNB regression rows;
+measured-flight reconciliation, material-exit placement, continuing target-spall fragmentation,
+and fragment-budget closure; the SNB regression rows;
 weapon-independence at a fixed impact
 speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
 5.45x39 US; all current local ballistic item templates; and exact acceptance of
 `com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part versions.
 
 The game-facing project has compile-only references to BepInEx, Harmony, SPT reflection,
-Assembly-CSharp, UnityEngine.CoreModule, and UnityEngine. `UnityEngine.dll` is required
-solely because BepInEx `BaseUnityPlugin` exposes `MonoBehaviour` from that assembly.
+Assembly-CSharp, UnityEngine.CoreModule, UnityEngine.PhysicsModule, and UnityEngine.
+`UnityEngine.PhysicsModule` supplies exact collider ray measurement. `UnityEngine.dll` is
+required solely because BepInEx `BaseUnityPlugin` exposes `MonoBehaviour` from that assembly.
 All game references use `Private=false`; none is copied to deployment.
 
 ## Explicit deployment

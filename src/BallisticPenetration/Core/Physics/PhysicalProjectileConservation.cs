@@ -154,10 +154,10 @@ namespace BallisticPenetration.Core.Physics
         SourceIdentityMismatch = 9,
         RootIdentityMismatch = 10,
         GenerationMismatch = 11,
-        ProjectileMassExceedsParent = 12,
-        RetainedProjectileMassExceedsParent = 13,
+        ParentDerivedMassExceedsParent = 12,
+        RetainedParentDerivedMassExceedsParent = 13,
         ChildEnergyExceedsResidual = 14,
-        ProjectileFragmentMissing = 15,
+        ParentFragmentMissing = 15,
         DerivedTotalInvalid = 16,
         SourceCollisionMismatch = 17,
         FragmentMassReservationInvalid = 18,
@@ -175,8 +175,8 @@ namespace BallisticPenetration.Core.Physics
         FragmentReservationOutcomeMismatch = 30,
         StateRevisionTerminalStateMismatch = 31,
         FragmentationOutputKindInvalid = 32,
-        ProjectileFragmentMassNotClosed = 33,
-        ProjectileFragmentEnergyNotClosed = 34,
+        ParentFragmentMassNotClosed = 33,
+        ParentFragmentEnergyNotClosed = 34,
         TargetSpallEnergyNotClosed = 35,
         FragmentationEnergyReclassificationInvalid = 36,
         FragmentationResponseMassNotClosed = 37,
@@ -188,37 +188,38 @@ namespace BallisticPenetration.Core.Physics
     public readonly struct PhysicalConservationResult : IEquatable<PhysicalConservationResult>
     {
         internal PhysicalConservationResult(
-            double availableProjectileMassKilograms,
-            double allocatedProjectileMassKilograms,
-            double retainedProjectileMassKilograms,
+            double availableParentMassKilograms,
+            double allocatedParentMassKilograms,
+            double retainedParentMassKilograms,
             double targetSpallMassKilograms,
             double parentEnergyJoules,
             double modeledLossEnergyJoules,
             double residualEnergyJoules,
             double childEnergyJoules,
-            int projectileOutputCount,
+            int parentDerivedOutputCount,
             int targetSpallOutputCount)
         {
-            AvailableProjectileMassKilograms = availableProjectileMassKilograms;
-            AllocatedProjectileMassKilograms = allocatedProjectileMassKilograms;
-            RetainedProjectileMassKilograms = retainedProjectileMassKilograms;
+            AvailableParentMassKilograms = availableParentMassKilograms;
+            AllocatedParentMassKilograms = allocatedParentMassKilograms;
+            RetainedParentMassKilograms = retainedParentMassKilograms;
             TargetSpallMassKilograms = targetSpallMassKilograms;
             ParentEnergyJoules = parentEnergyJoules;
             ModeledLossEnergyJoules = modeledLossEnergyJoules;
             ResidualEnergyJoules = residualEnergyJoules;
             ChildEnergyJoules = childEnergyJoules;
-            ProjectileOutputCount = projectileOutputCount;
+            ParentDerivedOutputCount = parentDerivedOutputCount;
             TargetSpallOutputCount = targetSpallOutputCount;
         }
 
-        public double AvailableProjectileMassKilograms { get; }
+        public double AvailableParentMassKilograms { get; }
 
-        public double AllocatedProjectileMassKilograms { get; }
+        public double AllocatedParentMassKilograms { get; }
 
-        public double RetainedProjectileMassKilograms { get; }
+        public double RetainedParentMassKilograms { get; }
 
         /// <summary>
-        /// Target material mass. This is reported separately and never consumes projectile mass.
+        /// Fresh target material mass created at this collision. It is reported separately and
+        /// never consumes mass retained by the immediate parent component.
         /// </summary>
         public double TargetSpallMassKilograms { get; }
 
@@ -230,13 +231,13 @@ namespace BallisticPenetration.Core.Physics
 
         public double ChildEnergyJoules { get; }
 
-        public int ProjectileOutputCount { get; }
+        public int ParentDerivedOutputCount { get; }
 
         public int TargetSpallOutputCount { get; }
 
-        public double UnallocatedProjectileMassKilograms
+        public double UnallocatedParentMassKilograms
         {
-            get { return AvailableProjectileMassKilograms - AllocatedProjectileMassKilograms; }
+            get { return AvailableParentMassKilograms - AllocatedParentMassKilograms; }
         }
 
         public double UnallocatedResidualEnergyJoules
@@ -246,15 +247,15 @@ namespace BallisticPenetration.Core.Physics
 
         public bool Equals(PhysicalConservationResult other)
         {
-            return AvailableProjectileMassKilograms.Equals(other.AvailableProjectileMassKilograms)
-                && AllocatedProjectileMassKilograms.Equals(other.AllocatedProjectileMassKilograms)
-                && RetainedProjectileMassKilograms.Equals(other.RetainedProjectileMassKilograms)
+            return AvailableParentMassKilograms.Equals(other.AvailableParentMassKilograms)
+                && AllocatedParentMassKilograms.Equals(other.AllocatedParentMassKilograms)
+                && RetainedParentMassKilograms.Equals(other.RetainedParentMassKilograms)
                 && TargetSpallMassKilograms.Equals(other.TargetSpallMassKilograms)
                 && ParentEnergyJoules.Equals(other.ParentEnergyJoules)
                 && ModeledLossEnergyJoules.Equals(other.ModeledLossEnergyJoules)
                 && ResidualEnergyJoules.Equals(other.ResidualEnergyJoules)
                 && ChildEnergyJoules.Equals(other.ChildEnergyJoules)
-                && ProjectileOutputCount == other.ProjectileOutputCount
+                && ParentDerivedOutputCount == other.ParentDerivedOutputCount
                 && TargetSpallOutputCount == other.TargetSpallOutputCount;
         }
 
@@ -267,15 +268,15 @@ namespace BallisticPenetration.Core.Physics
         {
             unchecked
             {
-                int hash = AvailableProjectileMassKilograms.GetHashCode();
-                hash = (hash * 397) ^ AllocatedProjectileMassKilograms.GetHashCode();
-                hash = (hash * 397) ^ RetainedProjectileMassKilograms.GetHashCode();
+                int hash = AvailableParentMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ AllocatedParentMassKilograms.GetHashCode();
+                hash = (hash * 397) ^ RetainedParentMassKilograms.GetHashCode();
                 hash = (hash * 397) ^ TargetSpallMassKilograms.GetHashCode();
                 hash = (hash * 397) ^ ParentEnergyJoules.GetHashCode();
                 hash = (hash * 397) ^ ModeledLossEnergyJoules.GetHashCode();
                 hash = (hash * 397) ^ ResidualEnergyJoules.GetHashCode();
                 hash = (hash * 397) ^ ChildEnergyJoules.GetHashCode();
-                hash = (hash * 397) ^ ProjectileOutputCount;
+                hash = (hash * 397) ^ ParentDerivedOutputCount;
                 hash = (hash * 397) ^ TargetSpallOutputCount;
                 return hash;
             }
@@ -525,8 +526,8 @@ namespace BallisticPenetration.Core.Physics
             PhysicalProjectileState? primaryRevision,
             PhysicalCollisionRecord? responseCollision,
             IReadOnlyList<PhysicalProjectileState?>? secondaryOutputs,
-            double reservedProjectileFragmentMassKilograms,
-            double reservedProjectileFragmentEnergyJoules,
+            double reservedParentFragmentMassKilograms,
+            double reservedParentFragmentEnergyJoules,
             double reservedTargetSpallMassKilograms,
             double reservedTargetSpallEnergyJoules,
             PhysicalLossBudget originalLossBudget,
@@ -539,8 +540,8 @@ namespace BallisticPenetration.Core.Physics
                 parent,
                 primaryRevision,
                 responseCollision,
-                reservedProjectileFragmentMassKilograms,
-                reservedProjectileFragmentEnergyJoules,
+                reservedParentFragmentMassKilograms,
+                reservedParentFragmentEnergyJoules,
                 originalLossBudget,
                 out _,
                 out failureReason))
@@ -597,13 +598,13 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            double projectileFragmentMassKilograms = 0d;
-            double projectileFragmentRetainedMassKilograms = 0d;
-            double projectileFragmentEnergyJoules = 0d;
+            double parentFragmentMassKilograms = 0d;
+            double parentFragmentRetainedMassKilograms = 0d;
+            double parentFragmentEnergyJoules = 0d;
             double targetSpallOriginalMassKilograms = 0d;
             double targetSpallMassKilograms = 0d;
             double targetSpallEnergyJoules = 0d;
-            int projectileFragmentCount = 0;
+            int parentFragmentCount = 0;
             int targetSpallCount = 0;
             var childIds = new HashSet<string>(StringComparer.Ordinal);
             var fragmentIndices = new HashSet<int>();
@@ -623,6 +624,7 @@ namespace BallisticPenetration.Core.Physics
                 }
 
                 if (child.Kind != PhysicalProjectileKind.ProjectileFragment
+                    && child.Kind != PhysicalProjectileKind.TargetSpallFragment
                     && child.Kind != PhysicalProjectileKind.TargetSpall)
                 {
                     failureReason = PhysicalConservationFailureReason.FragmentationOutputKindInvalid;
@@ -689,12 +691,13 @@ namespace BallisticPenetration.Core.Physics
                     return false;
                 }
 
-                if (child.Kind == PhysicalProjectileKind.ProjectileFragment)
+                if (child.Kind == PhysicalProjectileKind.ProjectileFragment
+                    || child.Kind == PhysicalProjectileKind.TargetSpallFragment)
                 {
-                    projectileFragmentCount++;
-                    projectileFragmentMassKilograms += child.OriginalMassKilograms;
-                    projectileFragmentRetainedMassKilograms += child.RetainedMassKilograms;
-                    projectileFragmentEnergyJoules += child.TranslationalKineticEnergyJoules;
+                    parentFragmentCount++;
+                    parentFragmentMassKilograms += child.OriginalMassKilograms;
+                    parentFragmentRetainedMassKilograms += child.RetainedMassKilograms;
+                    parentFragmentEnergyJoules += child.TranslationalKineticEnergyJoules;
                 }
                 else
                 {
@@ -705,16 +708,19 @@ namespace BallisticPenetration.Core.Physics
                 }
             }
 
-            if (projectileFragmentCount == 0)
+            bool parentFragmentsRequired =
+                reservedParentFragmentMassKilograms > massTolerance
+                || reservedParentFragmentEnergyJoules > energyTolerance;
+            if (parentFragmentsRequired && parentFragmentCount == 0)
             {
-                failureReason = PhysicalConservationFailureReason.ProjectileFragmentMissing;
+                failureReason = PhysicalConservationFailureReason.ParentFragmentMissing;
                 return false;
             }
 
             if (!AreFiniteNonNegative(
-                projectileFragmentMassKilograms,
-                projectileFragmentRetainedMassKilograms,
-                projectileFragmentEnergyJoules,
+                parentFragmentMassKilograms,
+                parentFragmentRetainedMassKilograms,
+                parentFragmentEnergyJoules,
                 targetSpallOriginalMassKilograms,
                 targetSpallMassKilograms,
                 targetSpallEnergyJoules))
@@ -724,21 +730,21 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (Math.Abs(
-                projectileFragmentMassKilograms
-                    - reservedProjectileFragmentMassKilograms) > massTolerance
+                parentFragmentMassKilograms
+                    - reservedParentFragmentMassKilograms) > massTolerance
                 || Math.Abs(
-                    projectileFragmentRetainedMassKilograms
-                        - reservedProjectileFragmentMassKilograms) > massTolerance)
+                    parentFragmentRetainedMassKilograms
+                        - reservedParentFragmentMassKilograms) > massTolerance)
             {
-                failureReason = PhysicalConservationFailureReason.ProjectileFragmentMassNotClosed;
+                failureReason = PhysicalConservationFailureReason.ParentFragmentMassNotClosed;
                 return false;
             }
 
             if (Math.Abs(
-                projectileFragmentEnergyJoules
-                    - reservedProjectileFragmentEnergyJoules) > energyTolerance)
+                parentFragmentEnergyJoules
+                    - reservedParentFragmentEnergyJoules) > energyTolerance)
             {
-                failureReason = PhysicalConservationFailureReason.ProjectileFragmentEnergyNotClosed;
+                failureReason = PhysicalConservationFailureReason.ParentFragmentEnergyNotClosed;
                 return false;
             }
 
@@ -761,10 +767,10 @@ namespace BallisticPenetration.Core.Physics
 
             double primaryMassKilograms = primaryRevision?.RetainedMassKilograms ?? 0d;
             double primaryEnergyJoules = primaryRevision?.TranslationalKineticEnergyJoules ?? 0d;
-            double allocatedProjectileMassKilograms = primaryMassKilograms
-                + projectileFragmentMassKilograms;
+            double allocatedParentMassKilograms = primaryMassKilograms
+                + parentFragmentMassKilograms;
             if (Math.Abs(
-                allocatedProjectileMassKilograms - parent.RetainedMassKilograms)
+                allocatedParentMassKilograms - parent.RetainedMassKilograms)
                 > massTolerance)
             {
                 failureReason = PhysicalConservationFailureReason.FragmentationResponseMassNotClosed;
@@ -772,7 +778,7 @@ namespace BallisticPenetration.Core.Physics
             }
 
             double allComponentEnergyJoules = primaryEnergyJoules
-                + projectileFragmentEnergyJoules
+                + parentFragmentEnergyJoules
                 + targetSpallEnergyJoules;
             double effectiveResidualEnergyJoules = Math.Max(
                 0d,
@@ -790,14 +796,14 @@ namespace BallisticPenetration.Core.Physics
 
             result = new PhysicalConservationResult(
                 parent.RetainedMassKilograms,
-                allocatedProjectileMassKilograms,
-                allocatedProjectileMassKilograms,
+                allocatedParentMassKilograms,
+                allocatedParentMassKilograms,
                 targetSpallMassKilograms,
                 parentEnergyJoules,
                 effectiveLossBudget.TotalLossJoules,
                 effectiveResidualEnergyJoules,
                 allComponentEnergyJoules,
-                projectileFragmentCount + (primaryRevision == null ? 0 : 1),
+                parentFragmentCount + (primaryRevision == null ? 0 : 1),
                 targetSpallCount);
             failureReason = PhysicalConservationFailureReason.None;
             return true;
@@ -823,7 +829,7 @@ namespace BallisticPenetration.Core.Physics
             PhysicalProjectileState? parent,
             IReadOnlyList<PhysicalProjectileState?>? outputs,
             PhysicalLossBudget lossBudget,
-            bool requireProjectileFragment,
+            bool requireParentFragment,
             out PhysicalConservationResult result,
             out PhysicalConservationFailureReason failureReason)
         {
@@ -856,13 +862,13 @@ namespace BallisticPenetration.Core.Physics
             }
 
             double residualEnergyJoules = Math.Max(0d, parentEnergyJoules - lossBudget.TotalLossJoules);
-            double allocatedProjectileMassKilograms = 0d;
-            double retainedProjectileMassKilograms = 0d;
+            double allocatedParentMassKilograms = 0d;
+            double retainedParentMassKilograms = 0d;
             double targetSpallMassKilograms = 0d;
             double childEnergyJoules = 0d;
-            int projectileOutputCount = 0;
+            int parentDerivedOutputCount = 0;
             int targetSpallOutputCount = 0;
-            bool hasProjectileFragment = false;
+            bool hasParentFragment = false;
             string? sourceCollisionId = null;
             var childIds = new HashSet<string>(StringComparer.Ordinal);
             var fragmentIndices = new HashSet<int>();
@@ -925,12 +931,13 @@ namespace BallisticPenetration.Core.Physics
                     return false;
                 }
 
-                if (child.IsProjectileDerivedMass)
+                if (child.IsParentDerivedMass)
                 {
-                    projectileOutputCount++;
-                    allocatedProjectileMassKilograms += child.OriginalMassKilograms;
-                    retainedProjectileMassKilograms += child.RetainedMassKilograms;
-                    hasProjectileFragment |= child.Kind == PhysicalProjectileKind.ProjectileFragment;
+                    parentDerivedOutputCount++;
+                    allocatedParentMassKilograms += child.OriginalMassKilograms;
+                    retainedParentMassKilograms += child.RetainedMassKilograms;
+                    hasParentFragment |= child.Kind == PhysicalProjectileKind.ProjectileFragment
+                        || child.Kind == PhysicalProjectileKind.TargetSpallFragment;
                 }
                 else
                 {
@@ -942,8 +949,8 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (!AreFiniteNonNegative(
-                allocatedProjectileMassKilograms,
-                retainedProjectileMassKilograms,
+                allocatedParentMassKilograms,
+                retainedParentMassKilograms,
                 targetSpallMassKilograms,
                 childEnergyJoules,
                 residualEnergyJoules))
@@ -953,15 +960,15 @@ namespace BallisticPenetration.Core.Physics
             }
 
             double massTolerance = Math.Max(0.000000001d, parent.RetainedMassKilograms * RelativeTolerance);
-            if (allocatedProjectileMassKilograms > parent.RetainedMassKilograms + massTolerance)
+            if (allocatedParentMassKilograms > parent.RetainedMassKilograms + massTolerance)
             {
-                failureReason = PhysicalConservationFailureReason.ProjectileMassExceedsParent;
+                failureReason = PhysicalConservationFailureReason.ParentDerivedMassExceedsParent;
                 return false;
             }
 
-            if (retainedProjectileMassKilograms > parent.RetainedMassKilograms + massTolerance)
+            if (retainedParentMassKilograms > parent.RetainedMassKilograms + massTolerance)
             {
-                failureReason = PhysicalConservationFailureReason.RetainedProjectileMassExceedsParent;
+                failureReason = PhysicalConservationFailureReason.RetainedParentDerivedMassExceedsParent;
                 return false;
             }
 
@@ -971,22 +978,22 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            if (requireProjectileFragment && !hasProjectileFragment)
+            if (requireParentFragment && !hasParentFragment)
             {
-                failureReason = PhysicalConservationFailureReason.ProjectileFragmentMissing;
+                failureReason = PhysicalConservationFailureReason.ParentFragmentMissing;
                 return false;
             }
 
             result = new PhysicalConservationResult(
                 parent.RetainedMassKilograms,
-                allocatedProjectileMassKilograms,
-                retainedProjectileMassKilograms,
+                allocatedParentMassKilograms,
+                retainedParentMassKilograms,
                 targetSpallMassKilograms,
                 parentEnergyJoules,
                 lossBudget.TotalLossJoules,
                 residualEnergyJoules,
                 childEnergyJoules,
-                projectileOutputCount,
+                parentDerivedOutputCount,
                 targetSpallOutputCount);
             failureReason = PhysicalConservationFailureReason.None;
             return true;
@@ -1088,6 +1095,12 @@ namespace BallisticPenetration.Core.Physics
             {
                 return revisionKind == PhysicalProjectileKind.IntactProjectile
                     || revisionKind == PhysicalProjectileKind.DeformedProjectile;
+            }
+
+            if (parentKind == PhysicalProjectileKind.TargetSpall
+                || parentKind == PhysicalProjectileKind.TargetSpallFragment)
+            {
+                return revisionKind == PhysicalProjectileKind.TargetSpallFragment;
             }
 
             return revisionKind == parentKind;

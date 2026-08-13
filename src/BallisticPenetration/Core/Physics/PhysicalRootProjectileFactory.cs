@@ -146,7 +146,9 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
-            if (!TryCreateForwardOrientation(direction, out PhysicalOrientation orientation))
+            if (!PhysicalOrientation.TryFromForward(
+                    direction,
+                    out PhysicalOrientation orientation))
             {
                 failureReason = PhysicalRootProjectileFailureReason.OrientationInvalid;
                 return false;
@@ -198,42 +200,6 @@ namespace BallisticPenetration.Core.Physics
 
             failureReason = PhysicalRootProjectileFailureReason.None;
             return true;
-        }
-
-        private static bool TryCreateForwardOrientation(
-            PhysicalVector3 direction,
-            out PhysicalOrientation orientation)
-        {
-            orientation = PhysicalOrientation.Identity;
-            double dot = direction.Z;
-            if (!FiniteDouble.IsFinite(dot))
-            {
-                return false;
-            }
-
-            if (dot < -0.999999999d)
-            {
-                orientation = new PhysicalOrientation(0d, 1d, 0d, 0d);
-                return orientation.IsUnit;
-            }
-
-            double x = -direction.Y;
-            double y = direction.X;
-            double z = 0d;
-            double w = 1d + dot;
-            double magnitudeSquared = (x * x) + (y * y) + (z * z) + (w * w);
-            if (!IsFinitePositive(magnitudeSquared))
-            {
-                return false;
-            }
-
-            double inverseMagnitude = 1d / Math.Sqrt(magnitudeSquared);
-            orientation = new PhysicalOrientation(
-                x * inverseMagnitude,
-                y * inverseMagnitude,
-                z * inverseMagnitude,
-                w * inverseMagnitude);
-            return orientation.IsUnit;
         }
 
         private static bool IsFinitePositive(double value)
