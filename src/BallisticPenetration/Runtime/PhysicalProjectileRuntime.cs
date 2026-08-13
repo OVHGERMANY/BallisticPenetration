@@ -24,6 +24,7 @@ namespace BallisticPenetration.Runtime
     internal sealed class PhysicalRuntimeCollisionState
     {
         internal PhysicalRuntimeCollisionState(
+            string transitionId,
             PhysicalProjectileState parentState,
             PhysicalProjectileMaterialProfile projectileProfile,
             PhysicalTargetMaterialProfile targetProfile,
@@ -34,6 +35,7 @@ namespace BallisticPenetration.Runtime
             float parentEftBallisticCoefficient,
             PhysicalShotBinding? sourceBinding)
         {
+            TransitionId = transitionId;
             ParentState = parentState;
             ProjectileProfile = projectileProfile;
             TargetProfile = targetProfile;
@@ -44,6 +46,8 @@ namespace BallisticPenetration.Runtime
             ParentEftBallisticCoefficient = parentEftBallisticCoefficient;
             SourceBinding = sourceBinding;
         }
+
+        internal string TransitionId { get; }
 
         internal PhysicalProjectileState ParentState { get; }
 
@@ -136,6 +140,7 @@ namespace BallisticPenetration.Runtime
                 impactState.SpeedMetresPerSecond / binding.State.SpeedMetresPerSecond,
                 penetrationRatio,
                 damageRatio);
+            PhysicalProjectileTelemetryRuntime.PublishPrepared(shot, collisionState);
             return PhysicalBoundFlightResult.Applied;
         }
 
@@ -185,7 +190,7 @@ namespace BallisticPenetration.Runtime
                 return false;
             }
 
-            return TryCreateCollisionState(
+            bool prepared = TryCreateCollisionState(
                 shot,
                 rootState,
                 shot.Damage,
@@ -193,6 +198,12 @@ namespace BallisticPenetration.Runtime
                 shot.BallisticCoefficient,
                 null,
                 out collisionState);
+            if (prepared && collisionState != null)
+            {
+                PhysicalProjectileTelemetryRuntime.PublishPrepared(shot, collisionState);
+            }
+
+            return prepared;
         }
 
         [SuppressMessage(
@@ -218,7 +229,7 @@ namespace BallisticPenetration.Runtime
                     return false;
                 }
 
-                string collisionId = CreateCollisionId(collisionState.ParentState, shot);
+                string collisionId = collisionState.TransitionId;
                 var deformationInput = new PhysicalDeformationInput
                 {
                     Parent = collisionState.ParentState,
@@ -242,6 +253,8 @@ namespace BallisticPenetration.Runtime
                     return false;
                 }
 
+                PhysicalLossBudget effectiveLossBudget = deformation.LossBudget;
+
                 if (outcome == PhysicalCollisionOutcome.Stopped)
                 {
                     PhysicalProjectileState? stoppedState = deformation.PrimaryState;
@@ -260,6 +273,11 @@ namespace BallisticPenetration.Runtime
                     }
 
                     PhysicalProjectileVisualRuntime.RegisterEmbedded(stoppedState);
+                    PhysicalProjectileTelemetryRuntime.PublishResolvedStopped(
+                        shot,
+                        collisionState,
+                        stoppedState,
+                        effectiveLossBudget);
                     return true;
                 }
 
@@ -295,6 +313,8 @@ namespace BallisticPenetration.Runtime
                     {
                         components.Add(fragmentation.AllSecondaryComponents[index]);
                     }
+
+                    effectiveLossBudget = fragmentation.EffectiveLossBudget;
                 }
                 else
                 {
@@ -329,6 +349,8 @@ namespace BallisticPenetration.Runtime
                         {
                             components.Add(targetSpall.Components[index]);
                         }
+
+                        effectiveLossBudget = targetSpall.EffectiveLossBudget;
                     }
                 }
 
@@ -370,6 +392,12 @@ namespace BallisticPenetration.Runtime
                 }
 
                 ReleaseShotsBestEffort(originalChildren);
+                PhysicalProjectileTelemetryRuntime.PublishResolved(
+                    shot,
+                    collisionState,
+                    outcome,
+                    components,
+                    effectiveLossBudget);
                 return true;
             }
             catch (Exception exception)
@@ -410,6 +438,7 @@ namespace BallisticPenetration.Runtime
             }
 
             collisionState = new PhysicalRuntimeCollisionState(
+                CreateCollisionId(state, shot),
                 state,
                 projectileProfile,
                 targetProfile,
