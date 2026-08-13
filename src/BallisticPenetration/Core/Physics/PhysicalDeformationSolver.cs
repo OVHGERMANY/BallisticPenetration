@@ -94,6 +94,9 @@ namespace BallisticPenetration.Core.Physics
             PhysicalProjectileState? primaryState,
             PhysicalCollisionRecord collisionRecord,
             PhysicalLossBudget lossBudget,
+            PhysicalVector3 incomingDirection,
+            PhysicalVector3 outgoingDirection,
+            PhysicalVector3 surfaceNormal,
             double physicalThicknessMetres,
             double effectivePathLengthMetres,
             double impactAngleRadians,
@@ -115,6 +118,9 @@ namespace BallisticPenetration.Core.Physics
             PrimaryState = primaryState;
             CollisionRecord = collisionRecord;
             LossBudget = lossBudget;
+            IncomingDirection = incomingDirection;
+            OutgoingDirection = outgoingDirection;
+            SurfaceNormal = surfaceNormal;
             PhysicalThicknessMetres = physicalThicknessMetres;
             EffectivePathLengthMetres = effectivePathLengthMetres;
             ImpactAngleRadians = impactAngleRadians;
@@ -139,6 +145,12 @@ namespace BallisticPenetration.Core.Physics
         public PhysicalCollisionRecord CollisionRecord { get; }
 
         public PhysicalLossBudget LossBudget { get; }
+
+        public PhysicalVector3 IncomingDirection { get; }
+
+        public PhysicalVector3 OutgoingDirection { get; }
+
+        public PhysicalVector3 SurfaceNormal { get; }
 
         public double PhysicalThicknessMetres { get; }
 
@@ -576,6 +588,9 @@ namespace BallisticPenetration.Core.Physics
                 primaryState,
                 collisionRecord,
                 lossBudget,
+                incomingDirection,
+                outgoingDirection,
+                surfaceNormal,
                 input.PhysicalThicknessMetres,
                 input.EffectivePathLengthMetres,
                 impactAngleRadians,

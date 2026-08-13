@@ -74,6 +74,11 @@ namespace BallisticPenetration.Validation
             Run("Conserved deformation and material response", ValidatePhysicalDeformationResponse);
             Run("Deformation solver fail-open behavior", ValidatePhysicalDeformationFallback);
             Run("Deformation solver deterministic property sweep", ValidatePhysicalDeformationStressSweep);
+            Run("Physical fragmentation profile validation", ValidatePhysicalFragmentationProfile);
+            Run("Conserved deterministic projectile fragmentation and target spall", ValidatePhysicalFragmentationResponse);
+            Run("Zero host fragment count closes physical reservations", ValidatePhysicalFragmentationMinimumOutput);
+            Run("Fragmentation solver fail-open behavior", ValidatePhysicalFragmentationFallback);
+            Run("Fragmentation solver deterministic property sweep", ValidatePhysicalFragmentationStressSweep);
             Run("Parse SPT items.json safely with System.Text.Json", delegate
             {
                 templates = LoadTemplatesWithBallisticStats(itemsPath);
@@ -1504,6 +1509,588 @@ namespace BallisticPenetration.Validation
             }
         }
 
+        private static void ValidatePhysicalFragmentationProfile()
+        {
+            PhysicalFragmentationProfile? profile;
+            PhysicalFragmentationProfileFailureReason reason;
+            AssertTrue(
+                "valid fragmentation profile accepted",
+                PhysicalFragmentationProfile.TryCreate(
+                    CreateTestFragmentationProfileInput(),
+                    out profile,
+                    out reason));
+            PhysicalFragmentationProfile validProfile = RequireValue(
+                "valid fragmentation profile",
+                profile);
+            AssertEqual(
+                "valid fragmentation profile reason",
+                PhysicalFragmentationProfileFailureReason.None,
+                reason);
+            AssertEqual(
+                "projectile fragment count cap preserved",
+                16,
+                validProfile.MaximumProjectileFragmentCount);
+            AssertTrue("target spall enabled", validProfile.ProducesTargetSpall);
+
+            PhysicalFragmentationProfileInput fullEnergyInput = CreateTestFragmentationProfileInput();
+            fullEnergyInput.TargetSpallKineticEnergyFraction = 1d;
+            AssertTrue(
+                "full penetration-work spall fraction is valid",
+                PhysicalFragmentationProfile.TryCreate(
+                    fullEnergyInput,
+                    out profile,
+                    out reason));
+            AssertTrue("full penetration-work spall profile returned", profile != null);
+            AssertEqual(
+                "full penetration-work spall profile reason",
+                PhysicalFragmentationProfileFailureReason.None,
+                reason);
+
+            PhysicalFragmentationProfileInput invalidInput = CreateTestFragmentationProfileInput();
+            invalidInput.MaximumProjectileFragmentCount = 257;
+            AssertFragmentationProfileFailure(
+                "fragment count above hard cap",
+                invalidInput,
+                PhysicalFragmentationProfileFailureReason.ProjectileCountInvalid);
+
+            invalidInput = CreateTestFragmentationProfileInput();
+            invalidInput.MinimumProjectileFragmentMassKilograms = 0d;
+            AssertFragmentationProfileFailure(
+                "zero minimum projectile fragment mass",
+                invalidInput,
+                PhysicalFragmentationProfileFailureReason.ProjectileMassInvalid);
+
+            invalidInput = CreateTestFragmentationProfileInput();
+            invalidInput.TargetSpallKineticEnergyFraction = 0d;
+            AssertFragmentationProfileFailure(
+                "spall mass without spall energy",
+                invalidInput,
+                PhysicalFragmentationProfileFailureReason.TargetSpallFractionInvalid);
+
+            invalidInput = CreateTestFragmentationProfileInput();
+            invalidInput.MaximumTargetSpallDragCoefficient = double.PositiveInfinity;
+            AssertFragmentationProfileFailure(
+                "nonfinite target spall drag",
+                invalidInput,
+                PhysicalFragmentationProfileFailureReason.TargetSpallDragCoefficientInvalid);
+        }
+
+        private static void ValidatePhysicalFragmentationResponse()
+        {
+            PhysicalProjectileState parent;
+            PhysicalProjectileMaterialProfile projectileProfile;
+            PhysicalTargetMaterialProfile targetProfile;
+            PhysicalDeformationResponse deformation;
+            CreateFragmentationScenario(
+                1000d,
+                "collision-fragmentation-response",
+                out parent,
+                out projectileProfile,
+                out targetProfile,
+                out deformation);
+            PhysicalFragmentationProfile fragmentationProfile = CreateTestFragmentationProfile();
+            PhysicalFragmentationInput input = CreateValidFragmentationInput(
+                parent,
+                deformation,
+                projectileProfile,
+                targetProfile,
+                fragmentationProfile,
+                4,
+                "projectile-fragment",
+                "target-spall");
+            PhysicalFragmentationResponse response = SolveFragmentationOrThrow(input);
+
+            AssertTrue(
+                "fragmentation keeps exact primary state revision",
+                ReferenceEquals(deformation.PrimaryState, response.PrimaryState));
+            AssertEqual("observed host fragment count retained", 4, response.ObservedProjectileFragmentCount);
+            AssertEqual("four physical projectile fragments emitted", 4, response.ProducedProjectileFragmentCount);
+            AssertTrue("target spall components emitted", response.TargetSpall.Count > 0);
+            AssertEqual(
+                "all-secondary count",
+                response.ProjectileFragments.Count + response.TargetSpall.Count,
+                response.AllSecondaryComponents.Count);
+
+            double projectileMass = 0d;
+            double projectileEnergy = 0d;
+            double spallMass = 0d;
+            double spallEnergy = 0d;
+            var identities = new HashSet<string>(StringComparer.Ordinal);
+            var indices = new HashSet<int>();
+            for (int index = 0; index < response.ProjectileFragments.Count; index++)
+            {
+                PhysicalProjectileState fragment = response.ProjectileFragments[index];
+                AssertPhysicalSecondary(
+                    "projectile fragment " + index.ToString(CultureInfo.InvariantCulture),
+                    fragment,
+                    parent,
+                    deformation,
+                    projectileProfile.DensityKilogramsPerCubicMetre,
+                    fragmentationProfile.ProjectileConeHalfAngleRadians,
+                    deformation.OutgoingDirection,
+                    identities,
+                    indices);
+                AssertEqual(
+                    "projectile fragment kind " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileKind.ProjectileFragment,
+                    fragment.Kind);
+                AssertEqual(
+                    "projectile fragment construction " + index.ToString(CultureInfo.InvariantCulture),
+                    parent.Construction,
+                    fragment.Construction);
+                AssertEqual(
+                    "projectile fragment shape " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileShapeClass.IrregularProjectileFragment,
+                    fragment.ShapeClass);
+                AssertTrue(
+                    "projectile fragment has less mass than parent " + index.ToString(CultureInfo.InvariantCulture),
+                    fragment.RetainedMassKilograms < parent.RetainedMassKilograms);
+                AssertTrue(
+                    "projectile fragment has independent ballistic coefficient " + index.ToString(CultureInfo.InvariantCulture),
+                    !fragment.BallisticCoefficientKilogramsPerSquareMetre.Equals(
+                        parent.BallisticCoefficientKilogramsPerSquareMetre));
+                projectileMass += fragment.RetainedMassKilograms;
+                projectileEnergy += fragment.TranslationalKineticEnergyJoules;
+            }
+
+            PhysicalVector3 spallAxis = RequireNormalized(
+                "target spall axis",
+                deformation.OutgoingDirection.Scale(0.75d)
+                    .Add(deformation.SurfaceNormal.Negate().Scale(0.25d)));
+            for (int index = 0; index < response.TargetSpall.Count; index++)
+            {
+                PhysicalProjectileState spall = response.TargetSpall[index];
+                AssertPhysicalSecondary(
+                    "target spall " + index.ToString(CultureInfo.InvariantCulture),
+                    spall,
+                    parent,
+                    deformation,
+                    targetProfile.DensityKilogramsPerCubicMetre,
+                    fragmentationProfile.TargetSpallConeHalfAngleRadians,
+                    spallAxis,
+                    identities,
+                    indices);
+                AssertEqual(
+                    "target spall kind " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileKind.TargetSpall,
+                    spall.Kind);
+                AssertEqual(
+                    "target spall construction " + index.ToString(CultureInfo.InvariantCulture),
+                    PhysicalProjectileConstruction.TargetMaterial,
+                    spall.Construction);
+                AssertTrue(
+                    "target spall has target-material shape " + index.ToString(CultureInfo.InvariantCulture),
+                    spall.ShapeClass == PhysicalProjectileShapeClass.TargetSpallFlake
+                        || spall.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk);
+                spallMass += spall.RetainedMassKilograms;
+                spallEnergy += spall.TranslationalKineticEnergyJoules;
+            }
+
+            PhysicalProjectileState primary = RequireValue(
+                "fragmentation primary state",
+                response.PrimaryState);
+            AssertNear(
+                "projectile fragment mass reservation closes",
+                deformation.AvailableFragmentMassKilograms,
+                projectileMass);
+            AssertNear(
+                "projectile fragment energy reservation closes",
+                deformation.AvailableFragmentEnergyJoules,
+                projectileEnergy);
+            AssertNear("target spall mass reservation closes", response.TargetSpallMassKilograms, spallMass);
+            AssertNear("target spall energy reservation closes", response.TargetSpallEnergyJoules, spallEnergy);
+            AssertNear(
+                "target spall energy comes from penetration work",
+                deformation.LossBudget.PenetrationLossJoules
+                    * fragmentationProfile.TargetSpallKineticEnergyFraction,
+                response.TargetSpallEnergyJoules);
+            AssertNear(
+                "effective penetration loss reclassifies target spall energy",
+                deformation.LossBudget.PenetrationLossJoules - response.TargetSpallEnergyJoules,
+                response.EffectiveLossBudget.PenetrationLossJoules);
+            AssertNear(
+                "fragmentation closes projectile mass",
+                parent.RetainedMassKilograms,
+                primary.RetainedMassKilograms + projectileMass);
+            AssertNear(
+                "fragmentation closes complete energy system",
+                parent.TranslationalKineticEnergyJoules,
+                response.EffectiveLossBudget.TotalLossJoules
+                    + primary.TranslationalKineticEnergyJoules
+                    + projectileEnergy
+                    + spallEnergy);
+            AssertNear(
+                "conservation report target spall mass",
+                spallMass,
+                response.ConservationResult.TargetSpallMassKilograms);
+
+            PhysicalFragmentationResponse repeated = SolveFragmentationOrThrow(input);
+            AssertFragmentationEquivalent("deterministic full response", response, repeated);
+
+            PhysicalFragmentationProfileInput fullSpallEnergyInput =
+                CreateTestFragmentationProfileInput();
+            fullSpallEnergyInput.TargetSpallKineticEnergyFraction = 1d;
+            PhysicalFragmentationProfile? fullSpallEnergyProfile;
+            PhysicalFragmentationProfileFailureReason fullSpallProfileReason;
+            AssertTrue(
+                "full penetration-work spall profile accepted for solving",
+                PhysicalFragmentationProfile.TryCreate(
+                    fullSpallEnergyInput,
+                    out fullSpallEnergyProfile,
+                    out fullSpallProfileReason));
+            AssertEqual(
+                "full penetration-work spall solving profile reason",
+                PhysicalFragmentationProfileFailureReason.None,
+                fullSpallProfileReason);
+            PhysicalFragmentationResponse fullSpallEnergyResponse = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    RequireValue("full penetration-work spall profile", fullSpallEnergyProfile),
+                    4,
+                    "full-energy-projectile-fragment",
+                    "full-energy-target-spall"));
+            AssertNear(
+                "all penetration work can become target spall kinetic energy",
+                deformation.LossBudget.PenetrationLossJoules,
+                fullSpallEnergyResponse.TargetSpallEnergyJoules);
+            AssertNear(
+                "full spall-energy transfer leaves zero penetration loss",
+                0d,
+                fullSpallEnergyResponse.EffectiveLossBudget.PenetrationLossJoules);
+
+            var corruptedOutputs = new List<PhysicalProjectileState?>(response.AllSecondaryComponents.Count);
+            PhysicalProjectileState firstFragment = response.ProjectileFragments[0];
+            PhysicalProjectileStateInput changedMassInput = CopyPhysicalStateToInput(firstFragment);
+            changedMassInput.OriginalMassKilograms *= 0.99d;
+            changedMassInput.RetainedMassKilograms *= 0.99d;
+            changedMassInput.DamageCapabilityJoules *= 0.99d;
+            corruptedOutputs.Add(CreatePhysicalStateOrThrow(changedMassInput));
+            for (int index = 1; index < response.AllSecondaryComponents.Count; index++)
+            {
+                corruptedOutputs.Add(response.AllSecondaryComponents[index]);
+            }
+
+            PhysicalConservationResult conservationResult;
+            PhysicalConservationFailureReason conservationReason;
+            AssertTrue(
+                "corrupted projectile fragment mass rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationResolution(
+                    parent,
+                    primary,
+                    deformation.CollisionRecord,
+                    corruptedOutputs,
+                    deformation.AvailableFragmentMassKilograms,
+                    deformation.AvailableFragmentEnergyJoules,
+                    response.TargetSpallMassKilograms,
+                    response.TargetSpallEnergyJoules,
+                    deformation.LossBudget,
+                    response.EffectiveLossBudget,
+                    out conservationResult,
+                    out conservationReason));
+            AssertEqual(
+                "corrupted projectile fragment mass reason",
+                PhysicalConservationFailureReason.ProjectileFragmentMassNotClosed,
+                conservationReason);
+
+            PhysicalCollisionRecordInput changedCollisionInput = CopyCollisionToInput(
+                deformation.CollisionRecord);
+            changedCollisionInput.MaterialId = "rewritten-fragment-history-material";
+            PhysicalProjectileStateInput changedHistoryInput = CopyPhysicalStateToInput(
+                firstFragment);
+            changedHistoryInput.CollisionHistory = new[]
+            {
+                CreateCollisionRecordOrThrow(changedCollisionInput)
+            };
+            PhysicalProjectileState?[] changedHistoryOutputs = ToNullableStates(
+                response.AllSecondaryComponents);
+            changedHistoryOutputs[0] = CreatePhysicalStateOrThrow(changedHistoryInput);
+            AssertTrue(
+                "rewritten fragment collision history rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationResolution(
+                    parent,
+                    primary,
+                    deformation.CollisionRecord,
+                    changedHistoryOutputs,
+                    deformation.AvailableFragmentMassKilograms,
+                    deformation.AvailableFragmentEnergyJoules,
+                    response.TargetSpallMassKilograms,
+                    response.TargetSpallEnergyJoules,
+                    deformation.LossBudget,
+                    response.EffectiveLossBudget,
+                    out conservationResult,
+                    out conservationReason));
+            AssertEqual(
+                "rewritten fragment collision history reason",
+                PhysicalConservationFailureReason.FragmentationHistoryMismatch,
+                conservationReason);
+
+            AssertTrue(
+                "incorrect target spall reservation rejected",
+                !PhysicalProjectileConservation.TryValidateFragmentationResolution(
+                    parent,
+                    primary,
+                    deformation.CollisionRecord,
+                    ToNullableStates(response.AllSecondaryComponents),
+                    deformation.AvailableFragmentMassKilograms,
+                    deformation.AvailableFragmentEnergyJoules,
+                    response.TargetSpallMassKilograms * 1.01d,
+                    response.TargetSpallEnergyJoules,
+                    deformation.LossBudget,
+                    response.EffectiveLossBudget,
+                    out conservationResult,
+                    out conservationReason));
+            AssertEqual(
+                "incorrect target spall reservation reason",
+                PhysicalConservationFailureReason.TargetSpallMassNotClosed,
+                conservationReason);
+        }
+
+        private static void ValidatePhysicalFragmentationMinimumOutput()
+        {
+            PhysicalProjectileState parent;
+            PhysicalProjectileMaterialProfile projectileProfile;
+            PhysicalTargetMaterialProfile targetProfile;
+            PhysicalDeformationResponse deformation;
+            CreateFragmentationScenario(
+                900d,
+                "collision-zero-host-fragments",
+                out parent,
+                out projectileProfile,
+                out targetProfile,
+                out deformation);
+            PhysicalFragmentationResponse response = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    CreateTestFragmentationProfile(),
+                    0,
+                    "minimum-projectile-fragment",
+                    "minimum-target-spall"));
+            AssertEqual("zero host fragment count remains observable", 0, response.ObservedProjectileFragmentCount);
+            AssertEqual("physical closure emits one projectile fragment", 1, response.ProducedProjectileFragmentCount);
+            AssertNear(
+                "minimum fragment owns full reserved mass",
+                deformation.AvailableFragmentMassKilograms,
+                response.ProjectileFragments[0].RetainedMassKilograms);
+            AssertNear(
+                "minimum fragment owns full reserved energy",
+                deformation.AvailableFragmentEnergyJoules,
+                response.ProjectileFragments[0].TranslationalKineticEnergyJoules);
+
+            PhysicalFragmentationProfileInput noSpallInput = CreateTestFragmentationProfileInput();
+            noSpallInput.TargetSpallEjectedMassFraction = 0d;
+            noSpallInput.TargetSpallKineticEnergyFraction = 0d;
+            PhysicalFragmentationProfile? noSpallProfile;
+            PhysicalFragmentationProfileFailureReason noSpallProfileReason;
+            AssertTrue(
+                "no-spall profile accepted",
+                PhysicalFragmentationProfile.TryCreate(
+                    noSpallInput,
+                    out noSpallProfile,
+                    out noSpallProfileReason));
+            AssertEqual(
+                "no-spall profile reason",
+                PhysicalFragmentationProfileFailureReason.None,
+                noSpallProfileReason);
+            PhysicalFragmentationResponse noSpallResponse = SolveFragmentationOrThrow(
+                CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    RequireValue("no-spall profile", noSpallProfile),
+                    0,
+                    "no-spall-projectile-fragment",
+                    null));
+            AssertEqual("no-spall profile emits no target components", 0, noSpallResponse.TargetSpall.Count);
+            AssertNear("no-spall profile target mass", 0d, noSpallResponse.TargetSpallMassKilograms);
+            AssertNear("no-spall profile target energy", 0d, noSpallResponse.TargetSpallEnergyJoules);
+        }
+
+        private static void ValidatePhysicalFragmentationFallback()
+        {
+            PhysicalProjectileState parent;
+            PhysicalProjectileMaterialProfile projectileProfile;
+            PhysicalTargetMaterialProfile targetProfile;
+            PhysicalDeformationResponse deformation;
+            CreateFragmentationScenario(
+                1000d,
+                "collision-fragmentation-fallback",
+                out parent,
+                out projectileProfile,
+                out targetProfile,
+                out deformation);
+            PhysicalFragmentationProfile profile = CreateTestFragmentationProfile();
+
+            PhysicalFragmentationInput input = CreateValidFragmentationInput(
+                parent,
+                deformation,
+                projectileProfile,
+                targetProfile,
+                profile,
+                -1,
+                "fallback-fragment",
+                "fallback-spall");
+            AssertFragmentationFailure(
+                "negative observed host count",
+                input,
+                PhysicalFragmentationFailureReason.ObservedFragmentCountInvalid);
+
+            input = CreateValidFragmentationInput(
+                parent,
+                deformation,
+                projectileProfile,
+                targetProfile,
+                profile,
+                3,
+                string.Empty,
+                "fallback-spall");
+            AssertFragmentationFailure(
+                "missing projectile id prefix",
+                input,
+                PhysicalFragmentationFailureReason.ProjectileIdPrefixMissing);
+
+            input = CreateValidFragmentationInput(
+                parent,
+                deformation,
+                projectileProfile,
+                targetProfile,
+                profile,
+                3,
+                "fallback-fragment",
+                null);
+            AssertFragmentationFailure(
+                "missing target spall id prefix",
+                input,
+                PhysicalFragmentationFailureReason.TargetSpallIdPrefixMissing);
+
+            PhysicalDeformationInput penetrationInput = CreateValidDeformationInput(
+                parent,
+                PhysicalCollisionOutcome.Penetrated,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                "collision-nonfragment-fallback",
+                parent.ProjectileId);
+            penetrationInput.ProjectileProfile = projectileProfile;
+            penetrationInput.TargetProfile = targetProfile;
+            input = CreateValidFragmentationInput(
+                parent,
+                SolveDeformationOrThrow(penetrationInput),
+                projectileProfile,
+                targetProfile,
+                profile,
+                3,
+                "fallback-fragment",
+                "fallback-spall");
+            AssertFragmentationFailure(
+                "nonfragment host outcome",
+                input,
+                PhysicalFragmentationFailureReason.FragmentationOutcomeMissing);
+        }
+
+        private static void ValidatePhysicalFragmentationStressSweep()
+        {
+            const int caseCount = 4096;
+            PhysicalProjectileMaterialProfile projectileProfile = CreateTestProjectileProfile();
+            PhysicalFragmentationProfile fragmentationProfile = CreateTestFragmentationProfile();
+            var random = new DeterministicProjectileRandom(
+                0x465241474D454E54UL,
+                0x50524F5045525459UL);
+            for (int index = 0; index < caseCount; index++)
+            {
+                double speedMetresPerSecond = Lerp(250d, 1400d, random.NextUnitDouble());
+                PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                    CreateValidRootInput(speedMetresPerSecond, 0.01d, 0.01d));
+                double effectivePathMetres = Lerp(0.001d, 0.02d, random.NextUnitDouble());
+                double physicalThicknessMetres = effectivePathMetres
+                    * Lerp(0.05d, 1d, random.NextUnitDouble());
+                double resistancePressurePascals = Lerp(
+                    100000d,
+                    20000000d,
+                    random.NextUnitDouble());
+                double fractureCoupling = Lerp(0.05d, 0.8d, random.NextUnitDouble());
+                PhysicalTargetMaterialProfile targetProfile = CreateTestTargetProfile(
+                    resistancePressurePascals,
+                    fractureCoupling);
+                PhysicalDeformationInput deformationInput = CreateValidDeformationInput(
+                    parent,
+                    PhysicalCollisionOutcome.Fragmented,
+                    physicalThicknessMetres,
+                    effectivePathMetres,
+                    resistancePressurePascals,
+                    fractureCoupling,
+                    "collision-fragment-property-" + index.ToString(CultureInfo.InvariantCulture),
+                    parent.ProjectileId);
+                deformationInput.ProjectileProfile = projectileProfile;
+                deformationInput.TargetProfile = targetProfile;
+                double impactAngleRadians = Lerp(
+                    0d,
+                    Math.PI * 0.4722222222222222d,
+                    random.NextUnitDouble());
+                deformationInput.SurfaceNormal = new PhysicalVector3(
+                    Math.Sin(impactAngleRadians),
+                    0d,
+                    -Math.Cos(impactAngleRadians));
+                double azimuthRadians = Math.PI * 2d * random.NextUnitDouble();
+                double forwardShare = Lerp(0.05d, 1d, random.NextUnitDouble());
+                double lateralShare = Math.Sqrt(1d - (forwardShare * forwardShare));
+                deformationInput.ObservedOutgoingDirection = new PhysicalVector3(
+                    lateralShare * Math.Cos(azimuthRadians),
+                    lateralShare * Math.Sin(azimuthRadians),
+                    forwardShare);
+                PhysicalDeformationResponse deformation = SolveDeformationOrThrow(
+                    deformationInput);
+                PhysicalFragmentationInput input = CreateValidFragmentationInput(
+                    parent,
+                    deformation,
+                    projectileProfile,
+                    targetProfile,
+                    fragmentationProfile,
+                    index % 49,
+                    "property-projectile-" + index.ToString(CultureInfo.InvariantCulture),
+                    "property-spall-" + index.ToString(CultureInfo.InvariantCulture));
+                PhysicalFragmentationResponse response = SolveFragmentationOrThrow(input);
+                string caseName = index.ToString(CultureInfo.InvariantCulture);
+                AssertTrue("property projectile fragments present " + caseName, response.ProjectileFragments.Count > 0);
+                AssertTrue(
+                    "property projectile count bounded " + caseName,
+                    response.ProjectileFragments.Count <= fragmentationProfile.MaximumProjectileFragmentCount);
+                AssertTrue(
+                    "property target spall count bounded " + caseName,
+                    response.TargetSpall.Count <= fragmentationProfile.MaximumTargetSpallCount);
+                AssertNear(
+                    "property fragmentation mass closure " + caseName,
+                    parent.RetainedMassKilograms,
+                    response.ConservationResult.AllocatedProjectileMassKilograms);
+                AssertNear(
+                    "property fragmentation energy closure " + caseName,
+                    parent.TranslationalKineticEnergyJoules,
+                    response.ConservationResult.ModeledLossEnergyJoules
+                        + response.ConservationResult.ChildEnergyJoules);
+                AssertFiniteNonNegative(
+                    "property target spall mass " + caseName,
+                    response.TargetSpallMassKilograms);
+                AssertFiniteNonNegative(
+                    "property target spall energy " + caseName,
+                    response.TargetSpallEnergyJoules);
+
+                if ((index & 255) == 0)
+                {
+                    AssertFragmentationEquivalent(
+                        "property deterministic response " + caseName,
+                        response,
+                        SolveFragmentationOrThrow(input));
+                }
+            }
+        }
+
         private static double Lerp(double minimum, double maximum, double fraction)
         {
             return minimum + ((maximum - minimum) * fraction);
@@ -1587,6 +2174,339 @@ namespace BallisticPenetration.Validation
             }
 
             return profile;
+        }
+
+        private static PhysicalFragmentationProfileInput CreateTestFragmentationProfileInput()
+        {
+            return new PhysicalFragmentationProfileInput
+            {
+                MaximumProjectileFragmentCount = 16,
+                MinimumProjectileFragmentMassKilograms = 0.00005d,
+                ProjectileConeHalfAngleRadians = Math.PI / 6d,
+                MinimumProjectileAspectRatio = 0.4d,
+                MaximumProjectileAspectRatio = 2.4d,
+                MinimumProjectileDragMultiplier = 0.8d,
+                MaximumProjectileDragMultiplier = 2.2d,
+                ProjectilePenetrationEfficiency = 0.7d,
+                TargetSpallEjectedMassFraction = 0.08d,
+                TargetSpallKineticEnergyFraction = 0.1d,
+                NominalTargetSpallMassKilograms = 0.00005d,
+                MaximumTargetSpallCount = 32,
+                TargetSpallConeHalfAngleRadians = Math.PI / 3d,
+                MinimumTargetSpallAspectRatio = 0.1d,
+                MaximumTargetSpallAspectRatio = 0.8d,
+                MinimumTargetSpallDragCoefficient = 0.9d,
+                MaximumTargetSpallDragCoefficient = 1.8d,
+                TargetSpallPenetrationEfficiency = 0.4d
+            };
+        }
+
+        private static PhysicalFragmentationProfile CreateTestFragmentationProfile()
+        {
+            PhysicalFragmentationProfile? profile;
+            PhysicalFragmentationProfileFailureReason reason;
+            if (!PhysicalFragmentationProfile.TryCreate(
+                CreateTestFragmentationProfileInput(),
+                out profile,
+                out reason)
+                || profile == null)
+            {
+                throw new InvalidOperationException(
+                    "Test fragmentation profile creation failed: " + reason + ".");
+            }
+
+            return profile;
+        }
+
+        private static void AssertFragmentationProfileFailure(
+            string name,
+            PhysicalFragmentationProfileInput input,
+            PhysicalFragmentationProfileFailureReason expectedReason)
+        {
+            PhysicalFragmentationProfile? profile;
+            PhysicalFragmentationProfileFailureReason actualReason;
+            bool success = PhysicalFragmentationProfile.TryCreate(
+                input,
+                out profile,
+                out actualReason);
+            AssertTrue(name + " fails", !success);
+            AssertTrue(name + " returns no profile", profile == null);
+            AssertEqual(name + " reason", expectedReason, actualReason);
+        }
+
+        private static void CreateFragmentationScenario(
+            double speedMetresPerSecond,
+            string collisionId,
+            out PhysicalProjectileState parent,
+            out PhysicalProjectileMaterialProfile projectileProfile,
+            out PhysicalTargetMaterialProfile targetProfile,
+            out PhysicalDeformationResponse deformation)
+        {
+            parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(speedMetresPerSecond, 0.01d, 0.01d));
+            projectileProfile = CreateTestProjectileProfile();
+            targetProfile = CreateTestTargetProfile(50000000d, 0.5d);
+            PhysicalDeformationInput deformationInput = CreateValidDeformationInput(
+                parent,
+                PhysicalCollisionOutcome.Fragmented,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                collisionId,
+                parent.ProjectileId);
+            deformationInput.ProjectileProfile = projectileProfile;
+            deformationInput.TargetProfile = targetProfile;
+            deformation = SolveDeformationOrThrow(deformationInput);
+        }
+
+        private static PhysicalFragmentationInput CreateValidFragmentationInput(
+            PhysicalProjectileState parent,
+            PhysicalDeformationResponse deformation,
+            PhysicalProjectileMaterialProfile projectileProfile,
+            PhysicalTargetMaterialProfile targetProfile,
+            PhysicalFragmentationProfile fragmentationProfile,
+            int observedProjectileFragmentCount,
+            string projectileIdPrefix,
+            string? targetSpallIdPrefix)
+        {
+            return new PhysicalFragmentationInput
+            {
+                Parent = parent,
+                DeformationResponse = deformation,
+                ProjectileProfile = projectileProfile,
+                TargetProfile = targetProfile,
+                FragmentationProfile = fragmentationProfile,
+                ObservedProjectileFragmentCount = observedProjectileFragmentCount,
+                ProjectileIdPrefix = projectileIdPrefix,
+                TargetSpallIdPrefix = targetSpallIdPrefix
+            };
+        }
+
+        private static PhysicalFragmentationResponse SolveFragmentationOrThrow(
+            PhysicalFragmentationInput input)
+        {
+            PhysicalFragmentationResponse? response;
+            PhysicalFragmentationFailureReason reason;
+            if (!PhysicalFragmentationSolver.TrySolve(input, out response, out reason)
+                || response == null)
+            {
+                throw new InvalidOperationException(
+                    "Valid physical fragmentation calculation failed: " + reason + ".");
+            }
+
+            return response;
+        }
+
+        private static void AssertFragmentationFailure(
+            string name,
+            PhysicalFragmentationInput input,
+            PhysicalFragmentationFailureReason expectedReason)
+        {
+            PhysicalFragmentationResponse? response;
+            PhysicalFragmentationFailureReason actualReason;
+            bool success = PhysicalFragmentationSolver.TrySolve(
+                input,
+                out response,
+                out actualReason);
+            AssertTrue(name + " fails open", !success);
+            AssertTrue(name + " returns no response", response == null);
+            AssertEqual(name + " reason", expectedReason, actualReason);
+        }
+
+        private static void AssertPhysicalSecondary(
+            string name,
+            PhysicalProjectileState state,
+            PhysicalProjectileState parent,
+            PhysicalDeformationResponse deformation,
+            double densityKilogramsPerCubicMetre,
+            double coneHalfAngleRadians,
+            PhysicalVector3 coneAxis,
+            HashSet<string> identities,
+            HashSet<int> indices)
+        {
+            AssertTrue(name + " identity is unique", identities.Add(state.ProjectileId));
+            AssertTrue(name + " fragment index is unique", indices.Add(state.FragmentIndex));
+            AssertEqual(name + " root lineage", parent.RootShotId, state.RootShotId);
+            AssertEqual(name + " parent lineage", parent.ProjectileId, state.ParentProjectileId);
+            AssertEqual(name + " source lineage", parent.ProjectileId, state.SourceProjectileId);
+            AssertEqual(name + " source material", deformation.CollisionRecord.MaterialId, state.SourceMaterialId);
+            AssertEqual(
+                name + " source material class",
+                deformation.CollisionRecord.MaterialClass,
+                state.SourceMaterialClass);
+            AssertEqual(
+                name + " source collision",
+                deformation.CollisionRecord.CollisionId,
+                state.SourceCollisionId);
+            AssertEqual(
+                name + " fragment generation",
+                parent.FragmentGeneration + 1,
+                state.FragmentGeneration);
+            AssertEqual(
+                name + " inherited history count",
+                parent.CollisionHistory.Count + 1,
+                state.CollisionHistory.Count);
+            for (int historyIndex = 0; historyIndex < parent.CollisionHistory.Count; historyIndex++)
+            {
+                AssertEqual(
+                    name + " inherited history " + historyIndex.ToString(CultureInfo.InvariantCulture),
+                    parent.CollisionHistory[historyIndex],
+                    state.CollisionHistory[historyIndex]);
+            }
+
+            AssertEqual(
+                name + " appended fragmentation collision",
+                deformation.CollisionRecord,
+                state.CollisionHistory[state.CollisionHistory.Count - 1]);
+            AssertTrue(name + " mass is finite and positive", IsFinite(state.RetainedMassKilograms) && state.RetainedMassKilograms > 0d);
+            AssertNear(name + " starts without mass loss", state.OriginalMassKilograms, state.RetainedMassKilograms);
+            AssertTrue(name + " diameter is finite and positive", IsFinite(state.DeformedDiameterMetres) && state.DeformedDiameterMetres > 0d);
+            AssertTrue(name + " area is finite and positive", IsFinite(state.ProjectedAreaSquareMetres) && state.ProjectedAreaSquareMetres > 0d);
+            AssertTrue(name + " length is finite and positive", IsFinite(state.LengthMetres) && state.LengthMetres > 0d);
+            AssertTrue(name + " drag is finite and positive", IsFinite(state.DragCoefficient) && state.DragCoefficient > 0d);
+            AssertTrue(name + " speed is finite and positive", IsFinite(state.SpeedMetresPerSecond) && state.SpeedMetresPerSecond > 0d);
+            AssertTrue(name + " energy is finite and positive", IsFinite(state.TranslationalKineticEnergyJoules) && state.TranslationalKineticEnergyJoules > 0d);
+            AssertTrue(name + " ballistic coefficient is finite and positive", IsFinite(state.BallisticCoefficientKilogramsPerSquareMetre) && state.BallisticCoefficientKilogramsPerSquareMetre > 0d);
+            AssertNear(
+                name + " ballistic coefficient uses own mass area and drag",
+                state.RetainedMassKilograms
+                    / (state.DragCoefficient * state.ProjectedAreaSquareMetres),
+                state.BallisticCoefficientKilogramsPerSquareMetre);
+            AssertNear(
+                name + " geometry volume closes mass and density",
+                state.RetainedMassKilograms / densityKilogramsPerCubicMetre,
+                Math.PI
+                    * state.DeformedDiameterMetres
+                    * state.DeformedDiameterMetres
+                    * 0.25d
+                    * state.LengthMetres);
+            AssertTrue(name + " orientation is unit", state.Orientation.IsUnit);
+            PhysicalVector3 velocityDirection = RequireNormalized(
+                name + " velocity direction",
+                state.VelocityMetresPerSecond);
+            PhysicalVector3 normalizedAxis = RequireNormalized(name + " cone axis", coneAxis);
+            AssertTrue(
+                name + " direction remains inside configured cone",
+                velocityDirection.Dot(normalizedAxis)
+                    >= Math.Cos(coneHalfAngleRadians) - 0.000000000001d);
+            PhysicalVector3 renderedForward = RotateLocalForward(state.Orientation);
+            AssertNear(
+                name + " orientation and velocity reproduce yaw",
+                Math.Cos(state.YawAngleRadians),
+                renderedForward.Dot(velocityDirection));
+            AssertTrue(
+                name + " nonzero yaw changes physical attitude",
+                renderedForward != velocityDirection);
+            AssertTrue(
+                name + " penetration capability is finite and nonnegative",
+                IsFinite(state.PenetrationCapabilityJoulesPerSquareMetre)
+                    && state.PenetrationCapabilityJoulesPerSquareMetre >= 0d);
+            AssertTrue(
+                name + " damage capability is bounded by kinetic energy",
+                IsFinite(state.DamageCapabilityJoules)
+                    && state.DamageCapabilityJoules >= 0d
+                    && state.DamageCapabilityJoules
+                        <= state.TranslationalKineticEnergyJoules + 0.000000001d);
+            AssertEqual(name + " terminal state", PhysicalProjectileTerminalState.Exited, state.TerminalState);
+            AssertEqual(name + " render state", PhysicalProjectileRenderState.NotRendered, state.RenderState);
+        }
+
+        private static void AssertFragmentationEquivalent(
+            string name,
+            PhysicalFragmentationResponse expected,
+            PhysicalFragmentationResponse actual)
+        {
+            AssertTrue(name + " primary identity", ReferenceEquals(expected.PrimaryState, actual.PrimaryState));
+            AssertEqual(name + " observed count", expected.ObservedProjectileFragmentCount, actual.ObservedProjectileFragmentCount);
+            AssertEqual(name + " projectile count", expected.ProjectileFragments.Count, actual.ProjectileFragments.Count);
+            AssertEqual(name + " target spall count", expected.TargetSpall.Count, actual.TargetSpall.Count);
+            AssertNear(name + " target spall mass", expected.TargetSpallMassKilograms, actual.TargetSpallMassKilograms);
+            AssertNear(name + " target spall energy", expected.TargetSpallEnergyJoules, actual.TargetSpallEnergyJoules);
+            AssertNear(
+                name + " effective loss",
+                expected.EffectiveLossBudget.TotalLossJoules,
+                actual.EffectiveLossBudget.TotalLossJoules);
+            for (int index = 0; index < expected.AllSecondaryComponents.Count; index++)
+            {
+                AssertPhysicalStateEquivalent(
+                    name + " component " + index.ToString(CultureInfo.InvariantCulture),
+                    expected.AllSecondaryComponents[index],
+                    actual.AllSecondaryComponents[index]);
+            }
+        }
+
+        private static void AssertPhysicalStateEquivalent(
+            string name,
+            PhysicalProjectileState expected,
+            PhysicalProjectileState actual)
+        {
+            AssertEqual(name + " kind", expected.Kind, actual.Kind);
+            AssertEqual(name + " id", expected.ProjectileId, actual.ProjectileId);
+            AssertEqual(name + " root", expected.RootShotId, actual.RootShotId);
+            AssertEqual(name + " parent", expected.ParentProjectileId, actual.ParentProjectileId);
+            AssertEqual(name + " source", expected.SourceProjectileId, actual.SourceProjectileId);
+            AssertEqual(name + " material", expected.SourceMaterialId, actual.SourceMaterialId);
+            AssertEqual(name + " material class", expected.SourceMaterialClass, actual.SourceMaterialClass);
+            AssertEqual(name + " collision", expected.SourceCollisionId, actual.SourceCollisionId);
+            AssertEqual(name + " index", expected.FragmentIndex, actual.FragmentIndex);
+            AssertEqual(name + " generation", expected.FragmentGeneration, actual.FragmentGeneration);
+            AssertEqual(name + " seed", expected.DeterministicSeed, actual.DeterministicSeed);
+            AssertEqual(name + " construction", expected.Construction, actual.Construction);
+            AssertEqual(name + " shape", expected.ShapeClass, actual.ShapeClass);
+            AssertNear(name + " original mass", expected.OriginalMassKilograms, actual.OriginalMassKilograms);
+            AssertNear(name + " retained mass", expected.RetainedMassKilograms, actual.RetainedMassKilograms);
+            AssertNear(name + " diameter", expected.DeformedDiameterMetres, actual.DeformedDiameterMetres);
+            AssertNear(name + " area", expected.ProjectedAreaSquareMetres, actual.ProjectedAreaSquareMetres);
+            AssertNear(name + " length", expected.LengthMetres, actual.LengthMetres);
+            AssertNear(name + " drag", expected.DragCoefficient, actual.DragCoefficient);
+            AssertEqual(name + " position", expected.PositionMetres, actual.PositionMetres);
+            AssertEqual(name + " velocity", expected.VelocityMetresPerSecond, actual.VelocityMetresPerSecond);
+            AssertEqual(name + " orientation", expected.Orientation, actual.Orientation);
+            AssertNear(name + " yaw", expected.YawAngleRadians, actual.YawAngleRadians);
+            AssertNear(name + " penetration", expected.PenetrationCapabilityJoulesPerSquareMetre, actual.PenetrationCapabilityJoulesPerSquareMetre);
+            AssertNear(name + " damage", expected.DamageCapabilityJoules, actual.DamageCapabilityJoules);
+            AssertEqual(name + " terminal", expected.TerminalState, actual.TerminalState);
+            AssertEqual(name + " render", expected.RenderState, actual.RenderState);
+            AssertEqual(name + " history count", expected.CollisionHistory.Count, actual.CollisionHistory.Count);
+            for (int index = 0; index < expected.CollisionHistory.Count; index++)
+            {
+                AssertEqual(
+                    name + " history " + index.ToString(CultureInfo.InvariantCulture),
+                    expected.CollisionHistory[index],
+                    actual.CollisionHistory[index]);
+            }
+        }
+
+        private static PhysicalProjectileState?[] ToNullableStates(
+            IReadOnlyList<PhysicalProjectileState> states)
+        {
+            var result = new PhysicalProjectileState?[states.Count];
+            for (int index = 0; index < states.Count; index++)
+            {
+                result[index] = states[index];
+            }
+
+            return result;
+        }
+
+        private static PhysicalVector3 RequireNormalized(string name, PhysicalVector3 vector)
+        {
+            PhysicalVector3 normalized;
+            if (!vector.TryNormalize(out normalized))
+            {
+                throw new InvalidOperationException(name + " could not be normalized.");
+            }
+
+            return normalized;
+        }
+
+        private static PhysicalVector3 RotateLocalForward(PhysicalOrientation orientation)
+        {
+            return new PhysicalVector3(
+                2d * ((orientation.X * orientation.Z) + (orientation.W * orientation.Y)),
+                2d * ((orientation.Y * orientation.Z) - (orientation.W * orientation.X)),
+                1d - (2d * ((orientation.X * orientation.X) + (orientation.Y * orientation.Y))));
         }
 
         private static PhysicalDeformationInput CreateValidDeformationInput(

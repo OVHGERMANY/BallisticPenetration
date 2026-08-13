@@ -159,6 +159,14 @@ namespace BallisticPenetration.Core.Physics
             return (X * other.X) + (Y * other.Y) + (Z * other.Z);
         }
 
+        public PhysicalVector3 Cross(PhysicalVector3 other)
+        {
+            return new PhysicalVector3(
+                (Y * other.Z) - (Z * other.Y),
+                (Z * other.X) - (X * other.Z),
+                (X * other.Y) - (Y * other.X));
+        }
+
         public bool TryNormalize(out PhysicalVector3 unitVector)
         {
             unitVector = Zero;
@@ -305,6 +313,52 @@ namespace BallisticPenetration.Core.Physics
         public static PhysicalOrientation Identity
         {
             get { return new PhysicalOrientation(0d, 0d, 0d, 1d); }
+        }
+
+        /// <summary>
+        /// Builds the shortest unit rotation from local positive Z to a world-space forward vector.
+        /// </summary>
+        public static bool TryFromForward(
+            PhysicalVector3 forward,
+            out PhysicalOrientation orientation)
+        {
+            orientation = Identity;
+            PhysicalVector3 unitForward;
+            if (!forward.TryNormalize(out unitForward))
+            {
+                return false;
+            }
+
+            double dot = Math.Max(-1d, Math.Min(1d, unitForward.Z));
+            if (dot <= -0.999999999d)
+            {
+                orientation = new PhysicalOrientation(1d, 0d, 0d, 0d);
+                return true;
+            }
+
+            double x = -unitForward.Y;
+            double y = unitForward.X;
+            double z = 0d;
+            double w = 1d + dot;
+            double magnitudeSquared = (x * x) + (y * y) + (z * z) + (w * w);
+            if (!FiniteDouble.IsFinite(magnitudeSquared) || magnitudeSquared <= 0d)
+            {
+                return false;
+            }
+
+            double inverseMagnitude = 1d / Math.Sqrt(magnitudeSquared);
+            var candidate = new PhysicalOrientation(
+                x * inverseMagnitude,
+                y * inverseMagnitude,
+                z * inverseMagnitude,
+                w * inverseMagnitude);
+            if (!candidate.IsUnit)
+            {
+                return false;
+            }
+
+            orientation = candidate;
+            return true;
         }
     }
 
