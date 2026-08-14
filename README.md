@@ -191,6 +191,7 @@ Available settings:
 - `Physical Rendering / Render Physical Components` (default `true`; requires the experimental physical path)
 - `Physical Rendering / Maximum Visible Components` (default `128`, range `8` through `512`)
 - `Physical Rendering / Maximum Tracked Components` (default `512`, range `16` through `4096`)
+- `Physical Rendering / Maximum Commands Processed Per Frame` (default `256`, range `32` through `1024`)
 - `Physical Rendering / Culling Distance Meters` (default `200`, range `10` through `2000`)
 - `Physical Rendering / Dimension Scale` (default `1`, range `0.25` through `25`)
 - `Physical Rendering / Minimum Rendered Diameter Millimeters` (default `0`, range `0` through `50`)

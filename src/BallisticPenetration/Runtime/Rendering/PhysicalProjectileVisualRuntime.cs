@@ -25,9 +25,9 @@ namespace BallisticPenetration.Runtime.Rendering
         private const int MaximumPendingCommands = 8192;
         private const string HostName = "BallisticPenetration.PhysicalGeometry";
 
-        private static readonly object CommandGate = new object();
-        private static readonly Queue<VisualCommand> PendingCommands =
-            new Queue<VisualCommand>();
+        private static readonly PhysicalVisualCommandBuffer<VisualCommand> PendingCommands =
+            new PhysicalVisualCommandBuffer<VisualCommand>(MaximumPendingCommands);
+        private static readonly List<VisualCommand> CommandBatch = new List<VisualCommand>();
         private static readonly Dictionary<long, ActiveVisual> ActiveByToken =
             new Dictionary<long, ActiveVisual>();
         private static readonly Dictionary<PhysicalShotBinding, long> TokenByBinding =
@@ -247,33 +247,36 @@ namespace BallisticPenetration.Runtime.Rendering
 
         private static void DrainCommands(PhysicalVisualPolicy policy)
         {
-            VisualCommand[] commands;
-            lock (CommandGate)
+            int commandCount = PendingCommands.DrainTo(
+                CommandBatch,
+                policy.MaximumCommandsProcessedPerFrame);
+            try
             {
-                commands = PendingCommands.ToArray();
-                PendingCommands.Clear();
-            }
-
-            for (int index = 0; index < commands.Length; index++)
-            {
-                VisualCommand command = commands[index];
-                switch (command.Kind)
+                for (int index = 0; index < commandCount; index++)
                 {
-                    case VisualCommandKind.RegisterLive:
-                        ProcessLiveRegistration(command, policy);
-                        break;
-                    case VisualCommandKind.RegisterEmbedded:
-                        ProcessEmbeddedRegistration(command, policy);
-                        break;
-                    case VisualCommandKind.RetireBinding:
-                        if (command.Binding != null
-                            && TokenByBinding.TryGetValue(command.Binding, out long token))
-                        {
-                            RemoveActive(token);
-                        }
+                    VisualCommand command = CommandBatch[index];
+                    switch (command.Kind)
+                    {
+                        case VisualCommandKind.RegisterLive:
+                            ProcessLiveRegistration(command, policy);
+                            break;
+                        case VisualCommandKind.RegisterEmbedded:
+                            ProcessEmbeddedRegistration(command, policy);
+                            break;
+                        case VisualCommandKind.RetireBinding:
+                            if (command.Binding != null
+                                && TokenByBinding.TryGetValue(command.Binding, out long token))
+                            {
+                                RemoveActive(token);
+                            }
 
-                        break;
+                            break;
+                    }
                 }
+            }
+            finally
+            {
+                CommandBatch.Clear();
             }
         }
 
@@ -773,23 +776,12 @@ namespace BallisticPenetration.Runtime.Rendering
 
         private static void ClearQueuedCommands()
         {
-            lock (CommandGate)
-            {
-                PendingCommands.Clear();
-            }
+            PendingCommands.Clear();
         }
 
         private static void Enqueue(VisualCommand command)
         {
-            lock (CommandGate)
-            {
-                while (PendingCommands.Count >= MaximumPendingCommands)
-                {
-                    PendingCommands.Dequeue();
-                }
-
-                PendingCommands.Enqueue(command);
-            }
+            _ = PendingCommands.Enqueue(command);
         }
 
         private static long NextOwnerToken()

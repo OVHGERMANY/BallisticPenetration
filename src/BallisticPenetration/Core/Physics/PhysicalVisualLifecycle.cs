@@ -13,7 +13,8 @@ namespace BallisticPenetration.Core.Physics
         CullingDistanceInvalid = 3,
         DimensionScaleInvalid = 4,
         MinimumDiameterInvalid = 5,
-        EmbeddedLifetimeInvalid = 6
+        EmbeddedLifetimeInvalid = 6,
+        CommandProcessingBudgetInvalid = 7
     }
 
     public sealed class PhysicalVisualPolicy
@@ -22,6 +23,8 @@ namespace BallisticPenetration.Core.Physics
         public const int MaximumVisibleCapacity = 512;
         public const int MinimumTrackedCapacity = 16;
         public const int MaximumTrackedCapacity = 4096;
+        public const int MinimumCommandProcessingBudget = 32;
+        public const int MaximumCommandProcessingBudget = 1024;
         public const double MinimumCullingDistanceMetres = 10d;
         public const double MaximumCullingDistanceMetres = 2000d;
         public const double MinimumDimensionScale = 0.25d;
@@ -36,7 +39,8 @@ namespace BallisticPenetration.Core.Physics
             double cullingDistanceMetres,
             double dimensionScale,
             double minimumRenderedDiameterMetres,
-            double embeddedLifetimeSeconds)
+            double embeddedLifetimeSeconds,
+            int maximumCommandsProcessedPerFrame)
         {
             MaximumVisibleComponents = maximumVisibleComponents;
             MaximumTrackedComponents = maximumTrackedComponents;
@@ -45,6 +49,7 @@ namespace BallisticPenetration.Core.Physics
             DimensionScale = dimensionScale;
             MinimumRenderedDiameterMetres = minimumRenderedDiameterMetres;
             EmbeddedLifetimeSeconds = embeddedLifetimeSeconds;
+            MaximumCommandsProcessedPerFrame = maximumCommandsProcessedPerFrame;
         }
 
         public int MaximumVisibleComponents { get; }
@@ -61,6 +66,8 @@ namespace BallisticPenetration.Core.Physics
 
         public double EmbeddedLifetimeSeconds { get; }
 
+        public int MaximumCommandsProcessedPerFrame { get; }
+
         public bool IsWithinCullingDistance(double distanceSquaredMetres)
         {
             return FiniteDouble.IsFinite(distanceSquaredMetres)
@@ -75,6 +82,7 @@ namespace BallisticPenetration.Core.Physics
             double dimensionScale,
             double minimumRenderedDiameterMetres,
             double embeddedLifetimeSeconds,
+            int maximumCommandsProcessedPerFrame,
             out PhysicalVisualPolicy? policy,
             out PhysicalVisualPolicyFailureReason failureReason)
         {
@@ -126,13 +134,21 @@ namespace BallisticPenetration.Core.Physics
                 return false;
             }
 
+            if (maximumCommandsProcessedPerFrame < MinimumCommandProcessingBudget
+                || maximumCommandsProcessedPerFrame > MaximumCommandProcessingBudget)
+            {
+                failureReason = PhysicalVisualPolicyFailureReason.CommandProcessingBudgetInvalid;
+                return false;
+            }
+
             policy = new PhysicalVisualPolicy(
                 maximumVisibleComponents,
                 maximumTrackedComponents,
                 cullingDistanceMetres,
                 dimensionScale,
                 minimumRenderedDiameterMetres,
-                embeddedLifetimeSeconds);
+                embeddedLifetimeSeconds,
+                maximumCommandsProcessedPerFrame);
             failureReason = PhysicalVisualPolicyFailureReason.None;
             return true;
         }

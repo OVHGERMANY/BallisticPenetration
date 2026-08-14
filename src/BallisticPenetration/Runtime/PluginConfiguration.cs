@@ -59,6 +59,16 @@ namespace BallisticPenetration.Runtime
                         PhysicalVisualPolicy.MinimumTrackedCapacity,
                         PhysicalVisualPolicy.MaximumTrackedCapacity)));
 
+            MaximumPhysicalCommandsProcessedPerFrame = config.Bind(
+                "Physical Rendering",
+                "Maximum Commands Processed Per Frame",
+                256,
+                new ConfigDescription(
+                    "Maximum queued physical-render lifecycle commands processed during one frame. Remaining commands retain FIFO order for later frames.",
+                    new AcceptableValueRange<int>(
+                        PhysicalVisualPolicy.MinimumCommandProcessingBudget,
+                        PhysicalVisualPolicy.MaximumCommandProcessingBudget)));
+
             PhysicalComponentCullingDistanceMeters = config.Bind(
                 "Physical Rendering",
                 "Culling Distance Meters",
@@ -184,6 +194,8 @@ namespace BallisticPenetration.Runtime
 
         internal ConfigEntry<int> MaximumTrackedPhysicalComponents { get; private set; }
 
+        internal ConfigEntry<int> MaximumPhysicalCommandsProcessedPerFrame { get; private set; }
+
         internal ConfigEntry<float> PhysicalComponentCullingDistanceMeters { get; private set; }
 
         internal ConfigEntry<float> PhysicalComponentDimensionScale { get; private set; }
@@ -229,6 +241,7 @@ namespace BallisticPenetration.Runtime
                 PhysicalComponentDimensionScale.Value,
                 MinimumRenderedPhysicalDiameterMillimeters.Value / 1000d,
                 EmbeddedPhysicalComponentLifetimeSeconds.Value,
+                MaximumPhysicalCommandsProcessedPerFrame.Value,
                 out policy,
                 out _);
         }

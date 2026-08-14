@@ -70,6 +70,7 @@ namespace BallisticPenetration.Validation
             Run("Physical projectile invalid-state fallback", ValidatePhysicalProjectileInvalidFallback);
             Run("Physical component render geometry", ValidatePhysicalVisualGeometry);
             Run("Physical renderer ownership and culling policy", ValidatePhysicalVisualLifecycle);
+            Run("Physical renderer FIFO command budgeting", ValidatePhysicalVisualCommandBudget);
             Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
             Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
@@ -889,6 +890,7 @@ namespace BallisticPenetration.Validation
                     1d,
                     0d,
                     45d,
+                    256,
                     out PhysicalVisualPolicy? policy,
                     out PhysicalVisualPolicyFailureReason policyReason));
             PhysicalVisualPolicy visualPolicy = RequireValue("physical visual policy", policy);
@@ -896,6 +898,10 @@ namespace BallisticPenetration.Validation
                 "valid physical visual policy reason",
                 PhysicalVisualPolicyFailureReason.None,
                 policyReason);
+            AssertEqual(
+                "valid physical command budget",
+                256,
+                visualPolicy.MaximumCommandsProcessedPerFrame);
             AssertTrue(
                 "component at culling boundary remains eligible",
                 visualPolicy.IsWithinCullingDistance(40000d));
@@ -914,12 +920,29 @@ namespace BallisticPenetration.Validation
                     1d,
                     0d,
                     45d,
+                    256,
                     out _,
                     out PhysicalVisualPolicyFailureReason capacityReason));
             AssertEqual(
                 "tracked capacity failure reason",
                 PhysicalVisualPolicyFailureReason.TrackedCapacityInvalid,
                 capacityReason);
+            AssertTrue(
+                "zero command processing budget rejected",
+                !PhysicalVisualPolicy.TryCreate(
+                    128,
+                    512,
+                    200d,
+                    1d,
+                    0d,
+                    45d,
+                    0,
+                    out _,
+                    out PhysicalVisualPolicyFailureReason commandBudgetReason));
+            AssertEqual(
+                "command processing budget failure reason",
+                PhysicalVisualPolicyFailureReason.CommandProcessingBudgetInvalid,
+                commandBudgetReason);
 
             var ledger = new PhysicalVisualOwnershipLedger(2);
             AssertTrue("first visual lease acquired", ledger.TryAcquire(101L, out PhysicalVisualLease first));
@@ -955,6 +978,39 @@ namespace BallisticPenetration.Validation
                 "expanded visual capacity reuses a valid low slot",
                 limitedLedger.TryAcquire(503L, 3, out PhysicalVisualLease expanded));
             AssertTrue("expanded visual slot stays below limit", expanded.Slot < 3);
+        }
+
+        private static void ValidatePhysicalVisualCommandBudget()
+        {
+            var commands = new PhysicalVisualCommandBuffer<string>(4);
+            AssertEqual("visual command capacity", 4, commands.Capacity);
+            AssertTrue("register A queued", commands.Enqueue("register-a"));
+            AssertTrue("retire A queued", commands.Enqueue("retire-a"));
+            AssertTrue("register B queued", commands.Enqueue("register-b"));
+
+            var batch = new List<string> { "stale" };
+            AssertEqual("first one-command frame", 1, commands.DrainTo(batch, 1));
+            AssertEqual("first command remains FIFO", "register-a", batch[0]);
+            AssertEqual("two commands remain pending", 2, commands.Count);
+            AssertEqual("second one-command frame", 1, commands.DrainTo(batch, 1));
+            AssertEqual("retire follows its registration", "retire-a", batch[0]);
+            AssertEqual("final command frame", 1, commands.DrainTo(batch, 4));
+            AssertEqual("later registration remains last", "register-b", batch[0]);
+            AssertEqual("command queue drained", 0, commands.Count);
+
+            AssertTrue("overflow command one queued", commands.Enqueue("one"));
+            AssertTrue("overflow command two queued", commands.Enqueue("two"));
+            AssertTrue("overflow command three queued", commands.Enqueue("three"));
+            AssertTrue("overflow command four queued", commands.Enqueue("four"));
+            AssertTrue("overflow reports oldest eviction", !commands.Enqueue("five"));
+            AssertEqual("bounded queue count", 4, commands.Count);
+            AssertEqual("bounded drain count", 4, commands.DrainTo(batch, 4));
+            AssertEqual("oldest retained command", "two", batch[0]);
+            AssertEqual("newest retained command", "five", batch[3]);
+
+            commands.Enqueue("clear-me");
+            commands.Clear();
+            AssertEqual("command queue clear", 0, commands.Count);
         }
 
         private static void AddDirectedMeshEdge(
