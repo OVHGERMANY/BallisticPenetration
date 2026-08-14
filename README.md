@@ -129,6 +129,10 @@ same pooled `Shot` object for another projectile.
 The runtime has conservative development profiles for projectile construction and EFT world,
 body, and armor material classes. These are deterministic engineering estimates derived from
 the limited fields exposed by EFT; they are not manufacturer metallurgy or certification data.
+Single-projectile large-caliber ammunition remains eligible when EFT's grenade-component fields
+describe only a visual impact effect: explosive strength, fragment count, fuse time, and blast
+distance must all be zero. Multi-projectile loads and mechanically explosive ammunition remain
+outside the physical path.
 An optional schema-1 reflection contract allows any collider to provide a canonical physical
 material class and opaque surface identity without a compile-time assembly reference. Invalid
 metadata leaves the host collision untouched. The built-in profiles distinguish titanium from
@@ -173,7 +177,10 @@ simulation and from other subscribers.
 
 This runtime path has passed offline compiler, analyzer, invariant, conservation, deterministic,
 renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. It has
-not completed the final integrated in-game acceptance campaign and remains experimental.
+entered the final integrated in-game acceptance campaign and remains experimental. Only the exact
+ballistic collider reported by EFT participates. A loose inventory item's visible mesh may lack an
+active ballistic collider; in that case the shot and physical model continue to the world surface
+behind it, and a decal overlapping the loose mesh is not evidence that the item absorbed the hit.
 
 ## Configuration
 

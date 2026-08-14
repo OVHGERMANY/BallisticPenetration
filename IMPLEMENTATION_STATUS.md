@@ -4,15 +4,16 @@ Snapshot date: 2026-08-13
 
 ## Current development build
 
-- Plugin version: `1.2.0`
+- Plugin version: `1.2.1`
 - Supported environment: SPT `4.1.2`, EFT `0.16.9.40743`
 - Production systems: exact collision-point velocity falloff, uncapped damage and penetration
   curves, cumulative multi-surface scaling, EFT armor integration, and postmortem armor
   durability processing
 - Experimental physical runtime: connected to host-confirmed collision outcomes behind a
-  default-off configuration gate; implemented offline and awaiting end-of-development integrated
-  game testing
-- This development build has not been deployed
+  default-off configuration gate; implemented offline and now in the final integrated game-test
+  campaign
+- The previous `1.2.0` candidate was deployed for campaign testing. Version `1.2.1` contains the
+  first two runtime-proven corrections and has not been deployed
 
 ## Physical-state development baseline
 
@@ -103,6 +104,9 @@ Snapshot date: 2026-08-13
 - Runtime mappings use conservative construction and material-class profiles derived from the
   limited host fields. They remain engineering estimates, not manufacturer metallurgy or
   certification data
+- Eligibility uses mechanical explosion data rather than EFT's large-impact effect marker.
+  Single-projectile ammunition with zero explosive strength, fragments, fuse time, and blast
+  distance is accepted; true explosive and multi-projectile ammunition remains excluded
 - An optional schema-1 reflection contract lets a collider supply one canonical physical material
   class and an opaque surface identity without a project or assembly reference. Malformed metadata
   fails open to vanilla instead of silently falling back to a different material. The default
@@ -147,19 +151,23 @@ Snapshot date: 2026-08-13
 
 - Checked Release and Debug builds with all default analyzers enabled, warnings as errors, checked
   arithmetic, deterministic continuous-integration settings: zero warnings, zero errors
-- Validation groups: 41 passed, zero failed, including immutable telemetry and observer isolation,
+- Validation groups: 43 passed, zero failed, including ammunition identity and kinetic-eligibility
+  regressions, immutable telemetry and observer isolation,
   deterministic render geometry, ownership, and FIFO workload budgeting, 4,096 deterministic deformation cases,
   4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
   reconciliation, fail-open rejection, and the complete installed-ammunition sweep
-- Two clean deterministic Release rebuilds produced the same 193,536-byte DLL, SHA-256
-  `641B35C6AF8E3787DE0FA3925E38EE69D970221C5FAAB69B22AEDD7CED2E71B7`
+- The maximum .NET analyzer set and formatting verification complete with zero warnings and zero
+  errors. Artifact hashes are recorded after each committed test build rather than embedded here
+  before the commit exists
 - Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
   nine fractions for 1,872 successful calculations and two expected abstract fallbacks
-- No deployment was performed for this development baseline
+- The effect-metadata sweep admits 10 single kinetic large-caliber templates and rejects all 10
+  mechanically explosive projectile templates in the installed database
 
 ## Next development layer
 
-Complete the remaining renderer identity, pooling, culling, and performance audit, including
-compiled-assembly inspection and deterministic capacity stress. Then reconcile the final
-cross-project documentation and prepare the exact development-complete test build and acceptance
-checklist. The combined runtime remains awaiting the final end-of-development in-game campaign.
+Finish the current integrated campaign against the committed correction build. Recheck M903 and
+one ordinary large-caliber effect-only round, confirm the corrected taxonomy name in physical
+telemetry, and continue the existing renderer, continuation, fragmentation, armor, corpse,
+durability, and performance observations. Additional development remains limited to defects
+reproduced by that campaign.
