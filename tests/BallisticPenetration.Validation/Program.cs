@@ -16,6 +16,9 @@ namespace BallisticPenetration.Validation
         private const string ItemsRelativePath = @"SPT_Runtime\SPT_Data\database\templates\items.json";
         private const string SnbInternalName = "patron_762x54R_SNB";
         private const string UsInternalName = "patron_545x39_US";
+        private const string SevenN40TemplateId = "61962b617c6c7b169525f168";
+        private const string M903TemplateId = "67dc2648ba5b79876906a166";
+        private const string Vog25TemplateId = "5656eb674bdc2d35148b457c";
         private const double Tolerance = 0.000000000001d;
 
         private static readonly double[] SweepFractions =
@@ -73,6 +76,9 @@ namespace BallisticPenetration.Validation
             Run("Physical renderer FIFO command budgeting", ValidatePhysicalVisualCommandBudget);
             Run("Physical renderer deterministic capacity stress", ValidatePhysicalVisualCapacityStress);
             Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
+            Run(
+                "Physical ammunition identity and kinetic eligibility",
+                delegate { ValidatePhysicalAmmunitionPolicy(itemsPath); });
             Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
             Run("Physical transition identities use exact component state", ValidatePhysicalTransitionIdentity);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
@@ -183,6 +189,203 @@ namespace BallisticPenetration.Validation
                     "unsupported SPT core version rejected: " + unsupportedVersion,
                     !SptVersionCompatibility.IsExactSupportedCoreVersion(unsupportedVersion));
             }
+        }
+
+        private static void ValidatePhysicalAmmunitionPolicy(string itemsPath)
+        {
+            AssertEqual(
+                "internal taxonomy name wins over inconsistent display name",
+                "patron_545x39_7n40",
+                PhysicalAmmunitionPolicy.SelectAuthoritativeTemplateName(
+                    "patron_545x39_7n40",
+                    "patron_545x39_BS"));
+            AssertEqual(
+                "display name remains a fallback",
+                "fallback_name",
+                PhysicalAmmunitionPolicy.SelectAuthoritativeTemplateName(
+                    string.Empty,
+                    "fallback_name"));
+            AssertEqual(
+                "missing names remain empty",
+                string.Empty,
+                PhysicalAmmunitionPolicy.SelectAuthoritativeTemplateName(null, null));
+
+            using var stream = File.OpenRead(itemsPath);
+            using var document = JsonDocument.Parse(stream);
+            JsonElement sevenN40 = document.RootElement.GetProperty(SevenN40TemplateId);
+            JsonElement sevenN40Properties = sevenN40.GetProperty("_props");
+            AssertEqual(
+                "installed 7N40 internal name",
+                "patron_545x39_7n40",
+                sevenN40.GetProperty("_name").GetString() ?? string.Empty);
+            AssertEqual(
+                "installed 7N40 inconsistent display name regression",
+                "patron_545x39_BS",
+                sevenN40Properties.GetProperty("Name").GetString() ?? string.Empty);
+
+            JsonElement m903Properties = document.RootElement
+                .GetProperty(M903TemplateId)
+                .GetProperty("_props");
+            AssertTrue(
+                "installed M903 carries the large-impact component",
+                m903Properties.GetProperty("HasGrenaderComponent").GetBoolean());
+            AssertEqual(
+                "installed M903 large-impact effect marker",
+                "big_round_impact",
+                m903Properties.GetProperty("ExplosionType").GetString() ?? string.Empty);
+            AssertTrue(
+                "installed M903 is an eligible single kinetic projectile",
+                IsEligibleInstalledProjectile(m903Properties));
+            AssertNear(
+                "installed M903 penetration power",
+                115d,
+                m903Properties.GetProperty("PenetrationPower").GetDouble());
+            AssertTrue(
+                "tungsten profile available for M903",
+                PhysicalDefaultProfileCatalog.TryGetProjectileProfile(
+                    PhysicalProjectileConstruction.TungstenCoreJacketed,
+                    out PhysicalProjectileMaterialProfile? m903Profile)
+                && m903Profile != null);
+            PhysicalProjectileMaterialProfile m903ProfileValue = RequireValue(
+                "M903 physical material profile",
+                m903Profile);
+            double m903Speed = m903Properties.GetProperty("InitialSpeed").GetDouble();
+            double m903MassKilograms = m903Properties.GetProperty("BulletMassGram").GetDouble()
+                * 0.001d;
+            double m903DiameterMetres = m903Properties
+                .GetProperty("BulletDiameterMilimeters")
+                .GetDouble()
+                * 0.001d;
+            var m903Input = new PhysicalRootProjectileInput
+            {
+                ProjectileId = "installed-m903-root",
+                RootShotId = "installed-m903-shot",
+                DeterministicSeed = 0x4D393033UL,
+                Construction = PhysicalProjectileConstruction.TungstenCoreJacketed,
+                ShapeClass = PhysicalProjectileShapeClass.Spitzer,
+                MassKilograms = m903MassKilograms,
+                NominalDiameterMetres = m903DiameterMetres,
+                MaterialDensityKilogramsPerCubicMetre =
+                    m903ProfileValue.DensityKilogramsPerCubicMetre,
+                DragCoefficient = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(
+                    PhysicalProjectileConstruction.TungstenCoreJacketed),
+                PositionMetres = PhysicalVector3.Zero,
+                VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, m903Speed)
+            };
+            AssertTrue(
+                "installed M903 creates a finite physical root",
+                PhysicalRootProjectileFactory.TryCreate(
+                    m903Input,
+                    out PhysicalProjectileState? m903State,
+                    out PhysicalRootProjectileFailureReason m903Reason));
+            AssertEqual(
+                "installed M903 root reason",
+                PhysicalRootProjectileFailureReason.None,
+                m903Reason);
+            PhysicalProjectileState m903StateValue = RequireValue(
+                "installed M903 physical root",
+                m903State);
+            AssertNear("installed M903 root mass", 0.027d, m903StateValue.RetainedMassKilograms);
+            AssertNear("installed M903 root diameter", 0.00762d, m903StateValue.NominalDiameterMetres);
+            AssertNear(
+                "installed M903 root energy",
+                0.5d * m903MassKilograms * m903Speed * m903Speed,
+                m903StateValue.TranslationalKineticEnergyJoules);
+
+            JsonElement vog25Properties = document.RootElement
+                .GetProperty(Vog25TemplateId)
+                .GetProperty("_props");
+            AssertTrue(
+                "installed VOG-25 remains excluded",
+                !IsEligibleInstalledProjectile(vog25Properties));
+
+            int effectMetadataProjectiles = 0;
+            int effectOnlyProjectilesAccepted = 0;
+            int mechanicalExplosivesRejected = 0;
+            foreach (JsonProperty itemProperty in document.RootElement.EnumerateObject())
+            {
+                JsonElement item = itemProperty.Value;
+                if (!item.TryGetProperty("_props", out JsonElement properties)
+                    || !properties.TryGetProperty("ProjectileCount", out _))
+                {
+                    continue;
+                }
+
+                bool hasGrenaderComponent = properties.TryGetProperty(
+                        "HasGrenaderComponent",
+                        out JsonElement grenaderElement)
+                    && grenaderElement.ValueKind == JsonValueKind.True;
+                string explosionType = properties.TryGetProperty(
+                        "ExplosionType",
+                        out JsonElement explosionTypeElement)
+                    && explosionTypeElement.ValueKind == JsonValueKind.String
+                        ? explosionTypeElement.GetString() ?? string.Empty
+                        : string.Empty;
+                if (!hasGrenaderComponent && string.IsNullOrEmpty(explosionType))
+                {
+                    continue;
+                }
+
+                effectMetadataProjectiles++;
+                bool eligible = IsEligibleInstalledProjectile(properties);
+                bool hasMechanicalExplosion =
+                    properties.GetProperty("ExplosionStrength").GetDouble() > 0d
+                    || properties.GetProperty("FragmentsCount").GetInt32() > 0
+                    || properties.GetProperty("FuzeArmTimeSec").GetDouble() > 0d
+                    || properties.GetProperty("MinExplosionDistance").GetDouble() > 0d
+                    || properties.GetProperty("MaxExplosionDistance").GetDouble() > 0d;
+                if (hasMechanicalExplosion)
+                {
+                    AssertTrue(
+                        "mechanical explosive rejected: " + itemProperty.Name,
+                        !eligible);
+                    mechanicalExplosivesRejected++;
+                }
+                else
+                {
+                    AssertTrue(
+                        "effect-only kinetic projectile accepted: " + itemProperty.Name,
+                        eligible);
+                    effectOnlyProjectilesAccepted++;
+                }
+            }
+
+            AssertEqual("effect-metadata projectile count", 20, effectMetadataProjectiles);
+            AssertEqual("effect-only kinetic projectile count", 10, effectOnlyProjectilesAccepted);
+            AssertEqual("mechanical explosive projectile count", 10, mechanicalExplosivesRejected);
+
+            AssertTrue(
+                "non-finite explosion metadata is rejected",
+                !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
+                    1,
+                    0,
+                    double.NaN,
+                    0,
+                    0d,
+                    0d,
+                    0d));
+            AssertTrue(
+                "multiple projectiles remain excluded",
+                !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
+                    2,
+                    0,
+                    0d,
+                    0,
+                    0d,
+                    0d,
+                    0d));
+        }
+
+        private static bool IsEligibleInstalledProjectile(JsonElement properties)
+        {
+            return PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
+                properties.GetProperty("ProjectileCount").GetInt32(),
+                properties.GetProperty("buckshotBullets").GetInt32(),
+                properties.GetProperty("ExplosionStrength").GetDouble(),
+                properties.GetProperty("FragmentsCount").GetInt32(),
+                properties.GetProperty("FuzeArmTimeSec").GetDouble(),
+                properties.GetProperty("MinExplosionDistance").GetDouble(),
+                properties.GetProperty("MaxExplosionDistance").GetDouble());
         }
 
         private static void ValidatePostmortemArmorHitGuards()

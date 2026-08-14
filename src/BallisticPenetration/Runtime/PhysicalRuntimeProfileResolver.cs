@@ -23,12 +23,14 @@ namespace BallisticPenetration.Runtime
             dragCoefficient = double.NaN;
             if (shot == null
                 || !(shot.Ammo?.Template is AmmoTemplate template)
-                || template.ProjectileCount != 1
-                || template.buckshotBullets > 1
-                || template.HasGrenaderComponent
-                || template.ExplosionStrength > 0f
-                || template.FragmentsCount > 0
-                || !string.IsNullOrEmpty(template.ExplosionType))
+                || !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
+                    template.ProjectileCount,
+                    template.buckshotBullets,
+                    template.ExplosionStrength,
+                    template.FragmentsCount,
+                    template.FuzeArmTimeSec,
+                    template.MinExplosionDistance,
+                    template.MaxExplosionDistance))
             {
                 return false;
             }

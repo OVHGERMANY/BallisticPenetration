@@ -162,7 +162,9 @@ namespace BallisticPenetration.Runtime
                 parentDepth,
                 rootProfileId ?? string.Empty,
                 template?.StringId ?? string.Empty,
-                template?.Name ?? string.Empty);
+                PhysicalAmmunitionPolicy.SelectAuthoritativeTemplateName(
+                    template?._name,
+                    template?.Name));
             return true;
         }
     }

@@ -27,7 +27,7 @@ namespace BallisticPenetration
     {
         internal const string PluginGuid = "com.janky.ballisticpenetration";
         internal const string PluginName = "Janky-BallisticPenetration";
-        internal const string PluginVersion = "1.2.0";
+        internal const string PluginVersion = "1.2.1";
 
         private CollisionSnapshotPatch? _collisionSnapshotPatch;
         private FragmentFalloffPatch? _fragmentFalloffPatch;
