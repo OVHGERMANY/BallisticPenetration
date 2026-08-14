@@ -444,7 +444,7 @@ namespace BallisticPenetration.Runtime
             }
 
             collisionState = new PhysicalRuntimeCollisionState(
-                CreateCollisionId(state, shot),
+                PhysicalProjectileTransitionIdentity.CreateCollisionId(state),
                 state,
                 projectileProfile,
                 targetProfile,
@@ -879,16 +879,6 @@ namespace BallisticPenetration.Runtime
                 shot.Ammo.Id.ToString(),
                 "-",
                 shot.FireIndex.ToString(CultureInfo.InvariantCulture),
-                "-",
-                shot.RandomSeed.ToString(CultureInfo.InvariantCulture));
-        }
-
-        private static string CreateCollisionId(PhysicalProjectileState state, Shot shot)
-        {
-            return string.Concat(
-                state.RootShotId,
-                "-collision-",
-                state.CollisionHistory.Count.ToString(CultureInfo.InvariantCulture),
                 "-",
                 shot.RandomSeed.ToString(CultureInfo.InvariantCulture));
         }

@@ -74,6 +74,7 @@ namespace BallisticPenetration.Validation
             Run("Physical renderer deterministic capacity stress", ValidatePhysicalVisualCapacityStress);
             Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
             Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
+            Run("Physical transition identities use exact component state", ValidatePhysicalTransitionIdentity);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
@@ -563,6 +564,45 @@ namespace BallisticPenetration.Validation
                 "collision history sequence mismatch",
                 input,
                 PhysicalProjectileStateFailureReason.CollisionSequenceMismatch);
+        }
+
+        private static void ValidatePhysicalTransitionIdentity()
+        {
+            PhysicalProjectileStateInput firstInput = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            firstInput.ProjectileId = "component-a";
+            firstInput.RootShotId = "shared-root";
+            firstInput.DeterministicSeed = 0x0000000000000001UL;
+            firstInput.CollisionHistory = new[] { CreateValidCollisionRecord() };
+            PhysicalProjectileState first = CreatePhysicalStateOrThrow(firstInput);
+
+            PhysicalProjectileStateInput secondInput = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            secondInput.ProjectileId = "component-b";
+            secondInput.RootShotId = "shared-root";
+            secondInput.DeterministicSeed = 0x0000000100000001UL;
+            secondInput.CollisionHistory = new[] { CreateValidCollisionRecord() };
+            PhysicalProjectileState second = CreatePhysicalStateOrThrow(secondInput);
+
+            string firstIdentity = PhysicalProjectileTransitionIdentity.CreateCollisionId(first);
+            string secondIdentity = PhysicalProjectileTransitionIdentity.CreateCollisionId(second);
+            AssertEqual(
+                "first component transition identity",
+                "component-a-collision-1",
+                firstIdentity);
+            AssertEqual(
+                "second component transition identity",
+                "component-b-collision-1",
+                secondIdentity);
+            AssertEqual(
+                "component transition identity is deterministic",
+                firstIdentity,
+                PhysicalProjectileTransitionIdentity.CreateCollisionId(first));
+            AssertTrue(
+                "components remain distinct when their EFT seed truncation matches",
+                !string.Equals(firstIdentity, secondIdentity, StringComparison.Ordinal));
+            AssertTrue(
+                "transition identity carries exact component identity",
+                firstIdentity.StartsWith("component-a-collision-", StringComparison.Ordinal)
+                    && secondIdentity.StartsWith("component-b-collision-", StringComparison.Ordinal));
         }
 
         private static void ValidatePhysicalVisualGeometry()
