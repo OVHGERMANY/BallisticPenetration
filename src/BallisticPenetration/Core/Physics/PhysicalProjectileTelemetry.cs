@@ -72,6 +72,7 @@ namespace BallisticPenetration.Core.Physics
             double effectivePathLengthMetres,
             string targetProfileId,
             PhysicalMaterialClass targetMaterialClass,
+            string targetSurfaceIdentity,
             double targetDensityKilogramsPerCubicMetre,
             double targetResistancePressurePascals,
             double projectileDeformationCoupling,
@@ -84,6 +85,7 @@ namespace BallisticPenetration.Core.Physics
             EffectivePathLengthMetres = effectivePathLengthMetres;
             TargetProfileId = targetProfileId ?? string.Empty;
             TargetMaterialClass = targetMaterialClass;
+            TargetSurfaceIdentity = targetSurfaceIdentity ?? string.Empty;
             TargetDensityKilogramsPerCubicMetre = targetDensityKilogramsPerCubicMetre;
             TargetResistancePressurePascals = targetResistancePressurePascals;
             ProjectileDeformationCoupling = projectileDeformationCoupling;
@@ -102,6 +104,8 @@ namespace BallisticPenetration.Core.Physics
         public string TargetProfileId { get; }
 
         public PhysicalMaterialClass TargetMaterialClass { get; }
+
+        public string TargetSurfaceIdentity { get; }
 
         public double TargetDensityKilogramsPerCubicMetre { get; }
 

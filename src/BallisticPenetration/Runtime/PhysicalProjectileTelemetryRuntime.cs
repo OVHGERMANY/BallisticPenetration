@@ -119,6 +119,7 @@ namespace BallisticPenetration.Runtime
                 geometry.EffectivePathLengthMetres,
                 target.ProfileId,
                 target.MaterialClass,
+                collisionState.TargetSurfaceIdentity,
                 target.DensityKilogramsPerCubicMetre,
                 target.EffectiveResistancePressurePascals,
                 target.ProjectileDeformationCoupling,

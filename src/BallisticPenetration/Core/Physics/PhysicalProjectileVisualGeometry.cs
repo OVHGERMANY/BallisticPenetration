@@ -329,6 +329,7 @@ namespace BallisticPenetration.Core.Physics
                     case PhysicalMaterialClass.Aluminum:
                     case PhysicalMaterialClass.MildSteel:
                     case PhysicalMaterialClass.ArmoredSteel:
+                    case PhysicalMaterialClass.Titanium:
                         return PhysicalVisualMaterialKey.TargetMetal;
                     case PhysicalMaterialClass.Ceramic:
                     case PhysicalMaterialClass.CompositeArmor:

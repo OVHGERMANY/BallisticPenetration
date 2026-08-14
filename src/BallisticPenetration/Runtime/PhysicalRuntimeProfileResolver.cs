@@ -77,17 +77,30 @@ namespace BallisticPenetration.Runtime
         internal static bool TryResolveTarget(
             Shot shot,
             out PhysicalTargetMaterialProfile? targetProfile,
-            out PhysicalFragmentationProfile? fragmentationProfile)
+            out PhysicalFragmentationProfile? fragmentationProfile,
+            out string targetSurfaceIdentity)
         {
             targetProfile = null;
             fragmentationProfile = null;
+            targetSurfaceIdentity = string.Empty;
             if (shot?.HittedBallisticCollider == null)
             {
                 return false;
             }
 
-            PhysicalMaterialClass materialClass = MapMaterial(
-                shot.HittedBallisticCollider.TypeOfMaterial);
+            PhysicalSurfaceMaterialMetadataStatus metadataStatus =
+                PhysicalSurfaceMaterialContract.TryRead(
+                    shot.HittedBallisticCollider,
+                    out PhysicalMaterialClass materialClass,
+                    out targetSurfaceIdentity);
+            if (metadataStatus == PhysicalSurfaceMaterialMetadataStatus.Invalid)
+            {
+                return false;
+            }
+            if (metadataStatus == PhysicalSurfaceMaterialMetadataStatus.Absent)
+            {
+                materialClass = MapMaterial(shot.HittedBallisticCollider.TypeOfMaterial);
+            }
             return materialClass != PhysicalMaterialClass.Unknown
                 && materialClass != PhysicalMaterialClass.Air
                 && PhysicalDefaultProfileCatalog.TryGetTargetProfile(

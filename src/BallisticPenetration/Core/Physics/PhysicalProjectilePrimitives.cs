@@ -57,7 +57,8 @@ namespace BallisticPenetration.Core.Physics
         CompositeArmor = 12,
         Concrete = 13,
         Soil = 14,
-        Other = 15
+        Other = 15,
+        Titanium = 16
     }
 
     public enum PhysicalProjectileTerminalState

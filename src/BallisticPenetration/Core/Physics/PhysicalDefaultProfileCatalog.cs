@@ -248,6 +248,7 @@ namespace BallisticPenetration.Core.Physics
             AddTargetProfile(profiles, PhysicalMaterialClass.Aluminum, 2700d, 180000000d, 0.65d, 0.55d, 0.15d);
             AddTargetProfile(profiles, PhysicalMaterialClass.MildSteel, 7850d, 350000000d, 0.80d, 0.70d, 0.18d);
             AddTargetProfile(profiles, PhysicalMaterialClass.ArmoredSteel, 7850d, 900000000d, 0.90d, 0.85d, 0.20d);
+            AddTargetProfile(profiles, PhysicalMaterialClass.Titanium, 4500d, 750000000d, 0.85d, 0.75d, 0.18d);
             AddTargetProfile(profiles, PhysicalMaterialClass.Ceramic, 3700d, 1100000000d, 0.90d, 0.95d, 0.22d);
             AddTargetProfile(profiles, PhysicalMaterialClass.CompositeArmor, 2200d, 650000000d, 0.85d, 0.80d, 0.18d);
             AddTargetProfile(profiles, PhysicalMaterialClass.Concrete, 2400d, 120000000d, 0.75d, 0.75d, 0.20d);
@@ -391,6 +392,7 @@ namespace BallisticPenetration.Core.Physics
                 || materialClass == PhysicalMaterialClass.Aluminum
                 || materialClass == PhysicalMaterialClass.MildSteel
                 || materialClass == PhysicalMaterialClass.ArmoredSteel
+                || materialClass == PhysicalMaterialClass.Titanium
                 || materialClass == PhysicalMaterialClass.Ceramic
                 || materialClass == PhysicalMaterialClass.CompositeArmor
                 || materialClass == PhysicalMaterialClass.Concrete;

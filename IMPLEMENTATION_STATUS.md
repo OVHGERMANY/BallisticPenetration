@@ -103,6 +103,10 @@ Snapshot date: 2026-08-13
 - Runtime mappings use conservative construction and material-class profiles derived from the
   limited host fields. They remain engineering estimates, not manufacturer metallurgy or
   certification data
+- An optional schema-1 reflection contract lets a collider supply one canonical physical material
+  class and an opaque surface identity without a project or assembly reference. Malformed metadata
+  fails open to vanilla instead of silently falling back to a different material. The default
+  catalog now includes a distinct titanium target/spall profile
 - Target density is carried for the later spall stage and is not claimed to affect the
   present deformation calculation
 - Physical thickness is retained as measured geometry while effective path drives work;
@@ -130,7 +134,8 @@ Snapshot date: 2026-08-13
   only after stopped-state registration or complete transactional child replacement
 - Records carry copied host identity, exact impact geometry, target profile, the complete immutable
   parent and outputs, projectile-derived mass, fresh target-spall mass, all loss categories,
-  residual/output energy, and closure error
+  residual/output energy, closure error, and the optional opaque target-surface identity used by
+  external fixture harnesses to bind evidence to one exact layer
 - The runtime performs no telemetry snapshot work with zero subscribers, and one failing subscriber
   cannot interrupt another subscriber or the physical transaction
 
@@ -138,7 +143,7 @@ Snapshot date: 2026-08-13
 
 - Checked Release and Debug builds with all default analyzers enabled, warnings as errors, checked
   arithmetic, deterministic continuous-integration settings: zero warnings, zero errors
-- Validation groups: 38 passed, zero failed, including immutable telemetry and observer isolation,
+- Validation groups: 39 passed, zero failed, including immutable telemetry and observer isolation,
   deterministic render geometry and ownership, 4,096 deterministic deformation cases,
   4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
   reconciliation, fail-open rejection, and the complete installed-ammunition sweep
@@ -146,9 +151,9 @@ Snapshot date: 2026-08-13
   nine fractions for 1,872 successful calculations and two expected abstract fallbacks
 - No deployment was performed for this development baseline
 
-## Next dependency
+## Next development layer
 
-Extend the standalone development lab through reflection-only subscription to the public telemetry
-boundary. Add schema-version validation, immutable report DTOs, paired prepared/resolved transition
-storage, conservation exports, deterministic campaign matrices, and automatic fixture reset without
-introducing a project reference or runtime dependency in either direction.
+Bound main-thread render-command processing per frame so a full bounded queue cannot create one
+unbounded frame spike. Preserve FIFO lifecycle ordering, stale-owner rejection, tracked/visible
+limits, and fail-open cleanup, then verify the budget with pure deterministic queue tests. The
+combined runtime remains awaiting the final end-of-development in-game campaign.

@@ -29,6 +29,7 @@ namespace BallisticPenetration.Runtime
             PhysicalProjectileMaterialProfile projectileProfile,
             PhysicalTargetMaterialProfile targetProfile,
             PhysicalFragmentationProfile fragmentationProfile,
+            string targetSurfaceIdentity,
             PhysicalImpactGeometry geometry,
             float parentEftDamage,
             float parentEftPenetrationPower,
@@ -40,6 +41,7 @@ namespace BallisticPenetration.Runtime
             ProjectileProfile = projectileProfile;
             TargetProfile = targetProfile;
             FragmentationProfile = fragmentationProfile;
+            TargetSurfaceIdentity = targetSurfaceIdentity ?? string.Empty;
             Geometry = geometry;
             ParentEftDamage = parentEftDamage;
             ParentEftPenetrationPower = parentEftPenetrationPower;
@@ -56,6 +58,8 @@ namespace BallisticPenetration.Runtime
         internal PhysicalTargetMaterialProfile TargetProfile { get; }
 
         internal PhysicalFragmentationProfile FragmentationProfile { get; }
+
+        internal string TargetSurfaceIdentity { get; }
 
         internal PhysicalImpactGeometry Geometry { get; }
 
@@ -425,7 +429,8 @@ namespace BallisticPenetration.Runtime
                 || !PhysicalRuntimeProfileResolver.TryResolveTarget(
                     shot,
                     out PhysicalTargetMaterialProfile? targetProfile,
-                    out PhysicalFragmentationProfile? fragmentationProfile)
+                    out PhysicalFragmentationProfile? fragmentationProfile,
+                    out string targetSurfaceIdentity)
                 || targetProfile == null
                 || fragmentationProfile == null
                 || !PhysicalImpactGeometryResolver.TryResolve(
@@ -444,6 +449,7 @@ namespace BallisticPenetration.Runtime
                 projectileProfile,
                 targetProfile,
                 fragmentationProfile,
+                targetSurfaceIdentity,
                 geometry,
                 parentEftDamage,
                 parentEftPenetrationPower,

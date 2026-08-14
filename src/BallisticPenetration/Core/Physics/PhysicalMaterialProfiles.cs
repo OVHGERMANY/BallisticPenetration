@@ -311,7 +311,7 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (input.MaterialClass <= PhysicalMaterialClass.Unknown
-                || input.MaterialClass > PhysicalMaterialClass.Other)
+                || input.MaterialClass > PhysicalMaterialClass.Titanium)
             {
                 failureReason = PhysicalMaterialProfileFailureReason.MaterialClassInvalid;
                 return false;

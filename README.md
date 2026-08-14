@@ -129,6 +129,10 @@ same pooled `Shot` object for another projectile.
 The runtime has conservative development profiles for projectile construction and EFT world,
 body, and armor material classes. These are deterministic engineering estimates derived from
 the limited fields exposed by EFT; they are not manufacturer metallurgy or certification data.
+An optional schema-1 reflection contract allows any collider to provide a canonical physical
+material class and opaque surface identity without a compile-time assembly reference. Invalid
+metadata leaves the host collision untouched. The built-in profiles distinguish titanium from
+armored steel while retaining separate aluminum, ceramic, polymer, fabric, and composite classes.
 The exact struck collider is measured from the entry hit to its far face. Physical thickness
 normal to the surface remains separate from the actual oblique path through material.
 
@@ -162,7 +166,8 @@ immutable prepared and resolved collision records through BCL-only subscription 
 external development tool can observe complete SI state without a compile-time dependency. Records
 include copied shot lineage, measured impact geometry, target profile, parent and output components,
 separate projectile-derived and fresh target-spall mass, declared losses, residual/output energy,
-and closure error. No pooled host or Unity object is retained. With no subscriber, the collision path
+closure error, and an optional opaque target-surface identity. No pooled host or Unity object is
+retained. With no subscriber, the collision path
 returns before constructing a telemetry snapshot; subscriber exceptions are isolated from the
 simulation and from other subscribers.
 

@@ -273,7 +273,7 @@ namespace BallisticPenetration.Core.Physics
         private static bool IsValidMaterialClass(PhysicalMaterialClass materialClass)
         {
             return materialClass >= PhysicalMaterialClass.Unknown
-                && materialClass <= PhysicalMaterialClass.Other;
+                && materialClass <= PhysicalMaterialClass.Titanium;
         }
     }
 }

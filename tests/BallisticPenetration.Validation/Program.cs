@@ -75,6 +75,7 @@ namespace BallisticPenetration.Validation
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
+            Run("Reflection-only physical surface material contract", ValidatePhysicalSurfaceMaterialContract);
             Run("Built-in physical profile catalog", ValidatePhysicalDefaultProfileCatalog);
             Run("Conserved deformation and material response", ValidatePhysicalDeformationResponse);
             Run("Deformation solver fail-open behavior", ValidatePhysicalDeformationFallback);
@@ -1186,6 +1187,7 @@ namespace BallisticPenetration.Validation
                 0.02d,
                 "armored-steel",
                 PhysicalMaterialClass.ArmoredSteel,
+                "fixture/7/plate/0",
                 7850d,
                 900000000d,
                 0.8d,
@@ -1215,6 +1217,10 @@ namespace BallisticPenetration.Validation
             AssertEqual("telemetry root fire index", 41, value.Host.RootFireIndex);
             AssertEqual("telemetry parent depth", 2, value.Host.ParentDepth);
             AssertEqual("telemetry target class", PhysicalMaterialClass.ArmoredSteel, value.Impact.TargetMaterialClass);
+            AssertEqual(
+                "telemetry target surface identity",
+                "fixture/7/plate/0",
+                value.Impact.TargetSurfaceIdentity);
 
             PhysicalTelemetryConservation conservation = RequireValue(
                 "telemetry conservation",
@@ -3006,7 +3012,7 @@ namespace BallisticPenetration.Validation
             }
 
             for (PhysicalMaterialClass materialClass = PhysicalMaterialClass.SoftTissue;
-                materialClass <= PhysicalMaterialClass.Other;
+                materialClass <= PhysicalMaterialClass.Titanium;
                 materialClass++)
             {
                 PhysicalTargetMaterialProfile? targetProfile;
@@ -3052,6 +3058,102 @@ namespace BallisticPenetration.Validation
                     PhysicalMaterialClass.Air,
                     out airProfile));
             AssertTrue("air profile remains null", airProfile == null);
+        }
+
+        private static void ValidatePhysicalSurfaceMaterialContract()
+        {
+            PhysicalMaterialClass materialClass;
+            AssertEqual(
+                "surface metadata absent",
+                PhysicalSurfaceMaterialMetadataStatus.Absent,
+                PhysicalSurfaceMaterialContract.TryRead(new object(), out materialClass));
+            AssertEqual("absent metadata class", PhysicalMaterialClass.Unknown, materialClass);
+
+            var valid = new ValidPhysicalSurface("Titanium");
+            AssertEqual(
+                "valid surface metadata resolved",
+                PhysicalSurfaceMaterialMetadataStatus.Resolved,
+                PhysicalSurfaceMaterialContract.TryRead(valid, out materialClass));
+            AssertEqual("valid surface material class", PhysicalMaterialClass.Titanium, materialClass);
+            AssertEqual(
+                "cached valid surface metadata resolved",
+                PhysicalSurfaceMaterialMetadataStatus.Resolved,
+                PhysicalSurfaceMaterialContract.TryRead(valid, out materialClass));
+
+            var identified = new IdentifiedPhysicalSurface("Ceramic", "fixture/19/plate/2");
+            AssertEqual(
+                "identified surface metadata resolved",
+                PhysicalSurfaceMaterialMetadataStatus.Resolved,
+                PhysicalSurfaceMaterialContract.TryRead(
+                    identified,
+                    out materialClass,
+                    out string surfaceIdentity));
+            AssertEqual("identified surface material class", PhysicalMaterialClass.Ceramic, materialClass);
+            AssertEqual("identified surface identity", "fixture/19/plate/2", surfaceIdentity);
+
+            object[] invalidSurfaces =
+            {
+                new UnsupportedPhysicalSurface(),
+                new PartialPhysicalSurface(),
+                new WrongTypePhysicalSurface(),
+                new ValidPhysicalSurface("titanium"),
+                new ValidPhysicalSurface("16"),
+                new EmptyIdentityPhysicalSurface(),
+                new WrongIdentityTypePhysicalSurface(),
+                new ThrowingPhysicalSurface()
+            };
+            for (int index = 0; index < invalidSurfaces.Length; index++)
+            {
+                AssertEqual(
+                    "invalid surface metadata " + index,
+                    PhysicalSurfaceMaterialMetadataStatus.Invalid,
+                    PhysicalSurfaceMaterialContract.TryRead(
+                        invalidSurfaces[index],
+                        out materialClass));
+                AssertEqual(
+                    "invalid surface metadata class " + index,
+                    PhysicalMaterialClass.Unknown,
+                    materialClass);
+            }
+
+            PhysicalMaterialClass[] canonicalClasses =
+            {
+                PhysicalMaterialClass.SoftTissue,
+                PhysicalMaterialClass.Bone,
+                PhysicalMaterialClass.Fabric,
+                PhysicalMaterialClass.Polymer,
+                PhysicalMaterialClass.Wood,
+                PhysicalMaterialClass.Glass,
+                PhysicalMaterialClass.Aluminum,
+                PhysicalMaterialClass.MildSteel,
+                PhysicalMaterialClass.ArmoredSteel,
+                PhysicalMaterialClass.Ceramic,
+                PhysicalMaterialClass.CompositeArmor,
+                PhysicalMaterialClass.Concrete,
+                PhysicalMaterialClass.Soil,
+                PhysicalMaterialClass.Other,
+                PhysicalMaterialClass.Titanium
+            };
+            foreach (PhysicalMaterialClass expected in canonicalClasses)
+            {
+                AssertTrue(
+                    "canonical surface class parses " + expected,
+                    PhysicalSurfaceMaterialContract.TryParseCanonicalMaterialClass(
+                        expected.ToString(),
+                        out materialClass));
+                AssertEqual("canonical surface class value " + expected, expected, materialClass);
+            }
+
+            AssertTrue(
+                "air is not a collision target material contract value",
+                !PhysicalSurfaceMaterialContract.TryParseCanonicalMaterialClass(
+                    nameof(PhysicalMaterialClass.Air),
+                    out materialClass));
+            AssertTrue(
+                "unknown is not a material contract value",
+                !PhysicalSurfaceMaterialContract.TryParseCanonicalMaterialClass(
+                    nameof(PhysicalMaterialClass.Unknown),
+                    out materialClass));
         }
 
         private static void ValidatePhysicalRootProjectileFactory()
@@ -4799,6 +4901,101 @@ namespace BallisticPenetration.Validation
             public double PenetrationPower { get; private set; }
 
             public double Damage { get; private set; }
+        }
+
+        private sealed class ValidPhysicalSurface
+        {
+            private readonly int _schema = 1;
+
+            internal ValidPhysicalSurface(string materialClass)
+            {
+                PhysicalBallisticsMaterialClass = materialClass;
+            }
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass { get; }
+        }
+
+        private sealed class UnsupportedPhysicalSurface
+        {
+            private readonly int _schema = 2;
+            private readonly string _materialClass = "ArmoredSteel";
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass => _materialClass;
+        }
+
+        private sealed class IdentifiedPhysicalSurface
+        {
+            private readonly int _schema = 1;
+
+            internal IdentifiedPhysicalSurface(string materialClass, string surfaceIdentity)
+            {
+                PhysicalBallisticsMaterialClass = materialClass;
+                PhysicalBallisticsSurfaceIdentity = surfaceIdentity;
+            }
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass { get; }
+
+            public string PhysicalBallisticsSurfaceIdentity { get; }
+        }
+
+        private sealed class EmptyIdentityPhysicalSurface
+        {
+            private readonly int _schema = 1;
+            private readonly string _materialClass = "ArmoredSteel";
+            private readonly string _surfaceIdentity = string.Empty;
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass => _materialClass;
+
+            public string PhysicalBallisticsSurfaceIdentity => _surfaceIdentity;
+        }
+
+        private sealed class WrongIdentityTypePhysicalSurface
+        {
+            private readonly int _schema = 1;
+            private readonly string _materialClass = "ArmoredSteel";
+            private readonly int _surfaceIdentity = 7;
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass => _materialClass;
+
+            public int PhysicalBallisticsSurfaceIdentity => _surfaceIdentity;
+        }
+
+        private sealed class PartialPhysicalSurface
+        {
+            private readonly int _schema = 1;
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+        }
+
+        private sealed class WrongTypePhysicalSurface
+        {
+            private readonly string _schema = "1";
+            private readonly string _materialClass = "ArmoredSteel";
+
+            public string PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass => _materialClass;
+        }
+
+        private sealed class ThrowingPhysicalSurface
+        {
+            private readonly int _schema = 1;
+            private readonly string _failureMessage = "Synthetic getter failure.";
+
+            public int PhysicalBallisticsSurfaceSchema => _schema;
+
+            public string PhysicalBallisticsMaterialClass =>
+                throw new InvalidOperationException(_failureMessage);
         }
 
         private readonly struct SnbCalculationRow

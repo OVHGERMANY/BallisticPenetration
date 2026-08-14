@@ -545,7 +545,7 @@ namespace BallisticPenetration.Core.Physics
                     || string.IsNullOrWhiteSpace(input.SourceMaterialId)
                     || string.IsNullOrWhiteSpace(input.SourceCollisionId)
                     || input.SourceMaterialClass <= PhysicalMaterialClass.Unknown
-                    || input.SourceMaterialClass > PhysicalMaterialClass.Other
+                    || input.SourceMaterialClass > PhysicalMaterialClass.Titanium
                     || input.FragmentGeneration <= 0)
                 {
                     failureReason = PhysicalProjectileStateFailureReason.ChildLineageInvalid;
