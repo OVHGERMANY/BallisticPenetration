@@ -403,18 +403,18 @@ namespace BallisticPenetration.Runtime.Rendering
                         continue;
                     }
 
-                    if (!EnsureSlot(lease.Slot))
-                    {
-                        Ownership.Release(lease);
-                        continue;
-                    }
-
                     visual.SetLease(lease);
                 }
 
                 if (!Ownership.IsCurrent(visual.Lease))
                 {
                     visual.ClearLease();
+                    continue;
+                }
+
+                if (!EnsureSlot(visual.Lease.Slot))
+                {
+                    ReleaseSlot(visual);
                     continue;
                 }
 

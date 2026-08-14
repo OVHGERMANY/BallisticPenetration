@@ -119,8 +119,9 @@ Snapshot date: 2026-08-13
 - Mesh scale uses each component's calculated diameter and length; physical attitude and yaw are
   carried through later measured flight instead of being reconstructed from a decal
 - Unity work is restricted to the main thread; collision hooks enqueue immutable render commands
-- A generation-owned fixed pool rejects stale owners, validates pooled-shot identity, recovers
-  destroyed slots, shrinks safely while idle, and cleans up on scene transitions
+- A generation-owned fixed pool rejects stale owners, validates pooled-shot identity, recreates a
+  destroyed slot without clearing other active visuals, shrinks safely while idle, and cleans up
+  on scene transitions
 - A thread-safe 8,192-command FIFO retains a bounded newest window. Main-thread processing is
   capped at 256 commands per frame by default, configurable from 32 through 1,024; unprocessed
   commands remain in exact retained order and the reusable batch is cleared even after failure
@@ -146,12 +147,12 @@ Snapshot date: 2026-08-13
 
 - Checked Release and Debug builds with all default analyzers enabled, warnings as errors, checked
   arithmetic, deterministic continuous-integration settings: zero warnings, zero errors
-- Validation groups: 40 passed, zero failed, including immutable telemetry and observer isolation,
+- Validation groups: 41 passed, zero failed, including immutable telemetry and observer isolation,
   deterministic render geometry, ownership, and FIFO workload budgeting, 4,096 deterministic deformation cases,
   4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
   reconciliation, fail-open rejection, and the complete installed-ammunition sweep
 - Two clean deterministic Release rebuilds produced the same 193,536-byte DLL, SHA-256
-  `88CE9FD3F0004F656CC00959A09C5FC833A8592BCA82B593213CAE6DF1D8B9D3`
+  `641B35C6AF8E3787DE0FA3925E38EE69D970221C5FAAB69B22AEDD7CED2E71B7`
 - Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
   nine fractions for 1,872 successful calculations and two expected abstract fallbacks
 - No deployment was performed for this development baseline

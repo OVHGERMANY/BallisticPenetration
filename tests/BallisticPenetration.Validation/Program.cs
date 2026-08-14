@@ -71,6 +71,7 @@ namespace BallisticPenetration.Validation
             Run("Physical component render geometry", ValidatePhysicalVisualGeometry);
             Run("Physical renderer ownership and culling policy", ValidatePhysicalVisualLifecycle);
             Run("Physical renderer FIFO command budgeting", ValidatePhysicalVisualCommandBudget);
+            Run("Physical renderer deterministic capacity stress", ValidatePhysicalVisualCapacityStress);
             Run("Physical renderer core remains dependency-free", ValidatePhysicalRendererIsolation);
             Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
@@ -1011,6 +1012,113 @@ namespace BallisticPenetration.Validation
             commands.Enqueue("clear-me");
             commands.Clear();
             AssertEqual("command queue clear", 0, commands.Count);
+        }
+
+        private static void ValidatePhysicalVisualCapacityStress()
+        {
+            const int QueueCapacity = 8192;
+            const int EnqueuedCommandCount = 10000;
+            const int CommandsPerFrame = 256;
+            var commands = new PhysicalVisualCommandBuffer<int>(QueueCapacity);
+            int evictionCount = 0;
+            for (int command = 0; command < EnqueuedCommandCount; command++)
+            {
+                if (!commands.Enqueue(command))
+                {
+                    evictionCount++;
+                }
+            }
+
+            AssertEqual(
+                "full command queue retains exact capacity",
+                QueueCapacity,
+                commands.Count);
+            AssertEqual(
+                "full command queue reports every eviction",
+                EnqueuedCommandCount - QueueCapacity,
+                evictionCount);
+            var commandBatch = new List<int>();
+            int expectedCommand = EnqueuedCommandCount - QueueCapacity;
+            int frameCount = 0;
+            while (commands.Count > 0)
+            {
+                int drained = commands.DrainTo(commandBatch, CommandsPerFrame);
+                AssertTrue(
+                    "stress frame respects command budget " + frameCount,
+                    drained > 0 && drained <= CommandsPerFrame);
+                for (int index = 0; index < drained; index++)
+                {
+                    AssertEqual(
+                        "stress command FIFO sequence " + expectedCommand,
+                        expectedCommand,
+                        commandBatch[index]);
+                    expectedCommand++;
+                }
+
+                frameCount++;
+            }
+
+            AssertEqual(
+                "stress command sequence reaches newest item",
+                EnqueuedCommandCount,
+                expectedCommand);
+            AssertEqual(
+                "stress queue drains in exact frame count",
+                QueueCapacity / CommandsPerFrame,
+                frameCount);
+
+            int capacity = PhysicalVisualPolicy.MaximumVisibleCapacity;
+            var ledger = new PhysicalVisualOwnershipLedger(capacity);
+            var firstGeneration = new PhysicalVisualLease[capacity];
+            for (int index = 0; index < capacity; index++)
+            {
+                AssertTrue(
+                    "stress initial lease acquired " + index,
+                    ledger.TryAcquire(index + 1L, out firstGeneration[index]));
+                AssertEqual("stress initial slot order " + index, index, firstGeneration[index].Slot);
+            }
+
+            AssertEqual("stress ledger reaches capacity", capacity, ledger.ActiveCount);
+            AssertTrue("stress ledger rejects over-capacity owner", !ledger.TryAcquire(9000L, out _));
+
+            for (int index = 0; index < capacity; index += 2)
+            {
+                AssertTrue(
+                    "stress even lease released " + index,
+                    ledger.Release(firstGeneration[index]));
+            }
+
+            AssertEqual("stress ledger half occupied", capacity / 2, ledger.ActiveCount);
+            var replacementGeneration = new List<PhysicalVisualLease>(capacity / 2);
+            for (int index = 0; index < capacity / 2; index++)
+            {
+                AssertTrue(
+                    "stress replacement lease acquired " + index,
+                    ledger.TryAcquire(10000L + index, out PhysicalVisualLease replacement));
+                AssertEqual("stress replacement reuses even slot " + index, index * 2, replacement.Slot);
+                AssertTrue(
+                    "stress replacement changes generation " + index,
+                    replacement.Generation != firstGeneration[index * 2].Generation);
+                AssertTrue(
+                    "stress stale release cannot evict replacement " + index,
+                    !ledger.Release(firstGeneration[index * 2]));
+                replacementGeneration.Add(replacement);
+            }
+
+            for (int index = 1; index < capacity; index += 2)
+            {
+                AssertTrue(
+                    "stress original odd lease released " + index,
+                    ledger.Release(firstGeneration[index]));
+            }
+            foreach (PhysicalVisualLease replacement in replacementGeneration)
+            {
+                AssertTrue("stress replacement lease released", ledger.Release(replacement));
+            }
+
+            AssertEqual("stress ledger fully released", 0, ledger.ActiveCount);
+            ledger.Reset();
+            AssertEqual("stress ledger reset remains empty", 0, ledger.ActiveCount);
         }
 
         private static void AddDirectedMeshEdge(
