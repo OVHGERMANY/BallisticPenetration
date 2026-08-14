@@ -1,6 +1,6 @@
 # BallisticPenetration implementation status
 
-Snapshot date: 2026-08-13
+Snapshot date: 2026-08-14
 
 ## Current development build
 
@@ -12,8 +12,9 @@ Snapshot date: 2026-08-13
 - Experimental physical runtime: connected to host-confirmed collision outcomes behind a
   default-off configuration gate; implemented offline and now in the final integrated game-test
   campaign
-- The previous `1.2.0` candidate was deployed for campaign testing. Version `1.2.1` contains the
-  first two runtime-proven corrections and has not been deployed
+- Version `1.2.1` contains the first two runtime-proven corrections and is installed for the next
+  user-led campaign session. Its DLL hash matches the validated development package; the game was
+  not launched during installation
 
 ## Physical-state development baseline
 
