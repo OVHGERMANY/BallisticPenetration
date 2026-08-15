@@ -59,6 +59,36 @@ namespace BallisticPenetration.Validation
         private static int _passed;
         private static int _failed;
 
+        private sealed class PooledNormalizationHost
+        {
+            internal PooledNormalizationHost(int incarnation)
+            {
+                Incarnation = incarnation;
+            }
+
+            internal int Incarnation { get; set; }
+        }
+
+        private sealed class PooledNormalizationBinding
+        {
+            internal PooledNormalizationBinding(
+                PooledNormalizationHost host,
+                BallisticNormalizationState state)
+            {
+                Incarnation = host.Incarnation;
+                State = state;
+            }
+
+            internal int Incarnation { get; }
+
+            internal BallisticNormalizationState State { get; }
+
+            internal bool Matches(PooledNormalizationHost host)
+            {
+                return host != null && host.Incarnation == Incarnation;
+            }
+        }
+
         public static int Main(string[] args)
         {
             string itemsPath;
@@ -134,6 +164,9 @@ namespace BallisticPenetration.Validation
             if (templates != null)
             {
                 Run("Full SPT template speed-factor sweep", delegate { ValidateFullTemplateSweep(templates); });
+                Run(
+                    "Full SPT multi-layer normalization sweep",
+                    delegate { ValidateFullTemplateNormalizationSweep(templates); });
                 Run("5.45x39 US template", delegate { ValidateUsTemplate(templates); });
             }
 
@@ -145,7 +178,9 @@ namespace BallisticPenetration.Validation
                 Run("Zero impact", ValidateZeroImpact);
                 Run("Invalid inputs retain the neutral fallback", ValidateInvalidInputs);
                 Run("Configurable exponents", ValidateConfigurableExponents);
-                Run("Monotonic and cumulative calculations", delegate { ValidateMonotonicAndCumulativeCalculations(snb); });
+                Run(
+                    "Monotonic factors and idempotent collision normalization",
+                    delegate { ValidateMonotonicAndCumulativeCalculations(snb); });
             }
             else
             {
@@ -5262,24 +5297,382 @@ namespace BallisticPenetration.Validation
                 previousDamage = factors.DamageFactor;
             }
 
-            var half = CalculateOrThrow(snb.InitialSpeed * 0.5d, snb.InitialSpeed);
-            var full = CalculateOrThrow(snb.InitialSpeed, snb.InitialSpeed);
-            var accelerated = CalculateOrThrow(snb.InitialSpeed * 1.2d, snb.InitialSpeed);
+            const double ReferenceSpeed = 849d;
+            BallisticFalloffFactors aboveReference = CalculateOrThrow(939.9d, ReferenceSpeed);
+            AssertNear(
+                ".338 AP reproduced penetration factor",
+                1.1530377949840798d,
+                aboveReference.PenetrationFactor);
+            AssertNear(
+                ".338 AP reproduced damage factor",
+                1.0415247238444205d,
+                aboveReference.DamageFactor);
+            BallisticNormalizationState aboveState = CreateRootNormalizationState(
+                "338-ap-component",
+                "338-ap-root");
+            double aboveDamage = 115d;
+            double abovePenetration = 79.35d;
+            for (int layer = 1; layer <= 4; layer++)
+            {
+                BallisticNormalizationTransition transition = AdvanceNormalizationOrThrow(
+                    ref aboveState,
+                    "338-ap-layer-" + layer,
+                    aboveDamage,
+                    abovePenetration,
+                    aboveReference);
+                aboveDamage = transition.OutputDamage;
+                abovePenetration = transition.OutputPenetrationPower;
+                AssertNear(
+                    "above-reference layer " + layer + " damage",
+                    115d * aboveReference.DamageFactor,
+                    aboveDamage);
+                AssertNear(
+                    "above-reference layer " + layer + " penetration",
+                    79.35d * aboveReference.PenetrationFactor,
+                    abovePenetration);
+                AssertNear(
+                    "above-reference layer " + layer + " damage ratio",
+                    layer == 1 ? aboveReference.DamageFactor : 1d,
+                    transition.AppliedDamageRatio);
+                AssertNear(
+                    "above-reference layer " + layer + " penetration ratio",
+                    layer == 1 ? aboveReference.PenetrationFactor : 1d,
+                    transition.AppliedPenetrationRatio);
+            }
+            AssertNear(
+                ".338 AP four-layer corrected damage",
+                119.77534324210836d,
+                aboveDamage);
+            AssertNear(
+                ".338 AP four-layer corrected penetration",
+                91.49354903198674d,
+                abovePenetration);
 
-            // Each new shot begins with the prior shot's already scaled stat value, so factors multiply
-            // sequentially instead of being added as independent contributions.
-            var cumulativePenetration = snb.PenetrationPower;
-            cumulativePenetration *= half.PenetrationFactor;
-            cumulativePenetration *= full.PenetrationFactor;
-            cumulativePenetration *= accelerated.PenetrationFactor;
+            BallisticFalloffFactors belowReference = CalculateOrThrow(700d, ReferenceSpeed);
+            BallisticNormalizationState belowState = CreateRootNormalizationState(
+                "below-component",
+                "below-root");
+            double belowDamage = 115d;
+            double belowPenetration = 79.35d;
+            for (int layer = 1; layer <= 4; layer++)
+            {
+                BallisticNormalizationTransition transition = AdvanceNormalizationOrThrow(
+                    ref belowState,
+                    "below-layer-" + layer,
+                    belowDamage,
+                    belowPenetration,
+                    belowReference);
+                belowDamage = transition.OutputDamage;
+                belowPenetration = transition.OutputPenetrationPower;
+                AssertNear(
+                    "below-reference layer " + layer + " damage",
+                    115d * belowReference.DamageFactor,
+                    belowDamage);
+                AssertNear(
+                    "below-reference layer " + layer + " penetration",
+                    79.35d * belowReference.PenetrationFactor,
+                    belowPenetration);
+            }
 
-            var cumulativeDamage = snb.Damage;
-            cumulativeDamage *= half.DamageFactor;
-            cumulativeDamage *= full.DamageFactor;
-            cumulativeDamage *= accelerated.DamageFactor;
+            BallisticNormalizationState changingState = CreateRootNormalizationState(
+                "changing-component",
+                "changing-root");
+            double changingDamage = 115d;
+            double changingPenetration = 79.35d;
+            var speeds = new[] { 939.9d, 900d, 800d, 700d };
+            for (int index = 0; index < speeds.Length; index++)
+            {
+                BallisticFalloffFactors factors = CalculateOrThrow(speeds[index], ReferenceSpeed);
+                BallisticNormalizationTransition transition = AdvanceNormalizationOrThrow(
+                    ref changingState,
+                    "changing-layer-" + index,
+                    changingDamage,
+                    changingPenetration,
+                    factors);
+                changingDamage = transition.OutputDamage;
+                changingPenetration = transition.OutputPenetrationPower;
+            }
 
-            AssertNear("sequential SNB penetration", 30.325183677340327d, cumulativePenetration);
-            AssertNear("sequential SNB damage", 61.139483220444205d, cumulativeDamage);
+            BallisticFalloffFactors finalFactors = CalculateOrThrow(700d, ReferenceSpeed);
+            AssertNear(
+                "decreasing-speed final damage",
+                115d * finalFactors.DamageFactor,
+                changingDamage);
+            AssertNear(
+                "decreasing-speed final penetration",
+                79.35d * finalFactors.PenetrationFactor,
+                changingPenetration);
+
+            BallisticNormalizationState reducedState = CreateRootNormalizationState(
+                "reduced-component",
+                "reduced-root");
+            BallisticNormalizationTransition firstReduced = AdvanceNormalizationOrThrow(
+                ref reducedState,
+                "reduced-layer-1",
+                115d,
+                79.35d,
+                aboveReference);
+            const double MaterialReduction = 0.63d;
+            const double ArmorReduction = 0.72d;
+            BallisticNormalizationTransition secondReduced = AdvanceNormalizationOrThrow(
+                ref reducedState,
+                "reduced-layer-2",
+                firstReduced.OutputDamage * MaterialReduction * ArmorReduction,
+                firstReduced.OutputPenetrationPower * MaterialReduction * ArmorReduction,
+                belowReference);
+            AssertNear(
+                "material and armor damage reductions survive normalization",
+                115d * MaterialReduction * ArmorReduction * belowReference.DamageFactor,
+                secondReduced.OutputDamage);
+            AssertNear(
+                "material and armor penetration reductions survive normalization",
+                79.35d * MaterialReduction * ArmorReduction * belowReference.PenetrationFactor,
+                secondReduced.OutputPenetrationPower);
+
+            BallisticNormalizationState? derivedState;
+            AssertTrue(
+                "derived child inherits represented factors",
+                BallisticNormalizationState.TryCreateDerivedChild(
+                    "derived-child",
+                    aboveState,
+                    out derivedState,
+                    out BallisticNormalizationFailureReason derivedReason));
+            AssertEqual(
+                "derived child creation reason",
+                BallisticNormalizationFailureReason.None,
+                derivedReason);
+            BallisticNormalizationState derived = RequireValue(
+                "derived normalization state",
+                derivedState);
+            BallisticNormalizationTransition derivedTransition = AdvanceNormalizationOrThrow(
+                ref derived,
+                "derived-layer-1",
+                aboveDamage * 0.8d,
+                abovePenetration * 0.8d,
+                aboveReference);
+            AssertNear(
+                "derived child same-speed damage is neutral",
+                aboveDamage * 0.8d,
+                derivedTransition.OutputDamage);
+            AssertNear(
+                "derived child same-speed penetration is neutral",
+                abovePenetration * 0.8d,
+                derivedTransition.OutputPenetrationPower);
+
+            foreach (string componentId in new[]
+            {
+                "physical-primary",
+                "physical-fragment",
+                "target-spall",
+                "target-spall-fragment"
+            })
+            {
+                BallisticNormalizationState physical = CreatePhysicalNormalizationState(
+                    componentId,
+                    "physical-root",
+                    aboveReference);
+                BallisticNormalizationTransition physicalTransition = AdvanceNormalizationOrThrow(
+                    ref physical,
+                    componentId + "-layer-1",
+                    17.25d,
+                    6.5d,
+                    aboveReference);
+                AssertEqual(
+                    componentId + " capability owns normalization",
+                    BallisticNormalizationDisposition.PhysicalCapabilityBypass,
+                    physicalTransition.Disposition);
+                AssertNear(componentId + " damage preserved", 17.25d, physicalTransition.OutputDamage);
+                AssertNear(
+                    componentId + " penetration preserved",
+                    6.5d,
+                    physicalTransition.OutputPenetrationPower);
+
+                AssertTrue(
+                    componentId + " derived child state is created",
+                    BallisticNormalizationState.TryCreateDerivedChild(
+                        componentId + "-derived",
+                        physical,
+                        out BallisticNormalizationState? physicalDerivedState,
+                        out BallisticNormalizationFailureReason physicalDerivedReason));
+                AssertEqual(
+                    componentId + " derived child reason",
+                    BallisticNormalizationFailureReason.None,
+                    physicalDerivedReason);
+                AssertEqual(
+                    componentId + " derived child retains physical ownership",
+                    BallisticNormalizationOwnership.PhysicalCapability,
+                    RequireValue(
+                        componentId + " derived child",
+                        physicalDerivedState).Ownership);
+            }
+
+            BallisticNormalizationState duplicateState = CreateRootNormalizationState(
+                "duplicate-component",
+                "duplicate-root");
+            BallisticNormalizationTransition firstDuplicate = AdvanceNormalizationOrThrow(
+                ref duplicateState,
+                "duplicate-layer-1",
+                115d,
+                79.35d,
+                aboveReference);
+            BallisticNormalizationState committedDuplicateState = duplicateState;
+            BallisticNormalizationTransition duplicate = AdvanceNormalizationOrThrow(
+                ref duplicateState,
+                "duplicate-layer-1",
+                firstDuplicate.OutputDamage,
+                firstDuplicate.OutputPenetrationPower,
+                belowReference);
+            AssertEqual(
+                "duplicate disposition",
+                BallisticNormalizationDisposition.Duplicate,
+                duplicate.Disposition);
+            AssertTrue(
+                "duplicate does not replace state",
+                ReferenceEquals(committedDuplicateState, duplicateState));
+            AssertNear(
+                "duplicate does not alter damage",
+                firstDuplicate.OutputDamage,
+                duplicate.OutputDamage);
+            AssertNear(
+                "duplicate does not alter penetration",
+                firstDuplicate.OutputPenetrationPower,
+                duplicate.OutputPenetrationPower);
+
+            BallisticNormalizationState failedState = duplicateState;
+            AssertTrue(
+                "failed calculation is rejected",
+                !BallisticNormalizationCalculator.TryAdvance(
+                    failedState,
+                    "invalid-layer",
+                    double.NaN,
+                    10d,
+                    aboveReference,
+                    out _,
+                    out BallisticNormalizationFailureReason invalidReason));
+            AssertEqual(
+                "invalid calculation reason",
+                BallisticNormalizationFailureReason.CurrentStatisticsInvalid,
+                invalidReason);
+            AssertTrue(
+                "failed calculation cannot advance immutable state",
+                ReferenceEquals(failedState, duplicateState));
+
+            var pooledHost = new PooledNormalizationHost(1);
+            var pooledStore = new PoolSafeReferenceBindingStore<
+                PooledNormalizationHost,
+                PooledNormalizationBinding>(
+                    delegate (PooledNormalizationBinding binding, PooledNormalizationHost host)
+                    {
+                        return binding.Matches(host);
+                    });
+            BallisticNormalizationState pooledOriginal = CreateRootNormalizationState(
+                "reused-host-old-component",
+                "reused-host-old-root");
+            var originalBinding = new PooledNormalizationBinding(pooledHost, pooledOriginal);
+            AssertTrue(
+                "pooled host accepts its original incarnation",
+                pooledStore.TryGetOrSet(pooledHost, originalBinding, out PooledNormalizationBinding storedOriginal));
+            AssertTrue(
+                "pooled host stores the exact original binding",
+                ReferenceEquals(originalBinding, storedOriginal));
+
+            pooledHost.Incarnation = 2;
+            AssertTrue(
+                "pooled host rejects and removes stale incarnation",
+                !pooledStore.TryGet(pooledHost, out _));
+
+            BallisticNormalizationState pooledReplacement = CreateRootNormalizationState(
+                "reused-host-new-component",
+                "reused-host-new-root");
+            var replacementBinding = new PooledNormalizationBinding(pooledHost, pooledReplacement);
+            AssertTrue(
+                "pooled host accepts replacement incarnation",
+                pooledStore.TryGetOrSet(
+                    pooledHost,
+                    replacementBinding,
+                    out PooledNormalizationBinding storedReplacement));
+            AssertTrue(
+                "pooled host stores exact replacement binding",
+                ReferenceEquals(replacementBinding, storedReplacement));
+            pooledStore.RemoveIfSame(pooledHost, originalBinding);
+            AssertTrue(
+                "stale cleanup cannot remove replacement binding",
+                pooledStore.TryGet(pooledHost, out PooledNormalizationBinding? afterStaleCleanup)
+                    && ReferenceEquals(replacementBinding, afterStaleCleanup));
+            var staleReplacementAttempt = new PooledNormalizationBinding(
+                pooledHost,
+                pooledOriginal);
+            AssertTrue(
+                "stale commit cannot overwrite replacement binding",
+                !pooledStore.TryReplace(
+                    pooledHost,
+                    originalBinding,
+                    staleReplacementAttempt,
+                    out _));
+            AssertNear(
+                "pooled replacement starts with neutral penetration factor",
+                1d,
+                pooledReplacement.RepresentedPenetrationFactor);
+            AssertNear(
+                "pooled replacement starts with neutral damage factor",
+                1d,
+                pooledReplacement.RepresentedDamageFactor);
+            AssertTrue(
+                "pooled replacement component identity is isolated",
+                !string.Equals(
+                    duplicateState.ComponentId,
+                    pooledReplacement.ComponentId,
+                    StringComparison.Ordinal));
+
+            for (int layerCount = 1; layerCount <= 6; layerCount++)
+            {
+                BallisticNormalizationState layered = CreateRootNormalizationState(
+                    "layered-component-" + layerCount,
+                    "layered-root-" + layerCount);
+                double layeredDamage = 115d;
+                double layeredPenetration = 79.35d;
+                for (int layer = 0; layer < layerCount; layer++)
+                {
+                    BallisticNormalizationTransition transition = AdvanceNormalizationOrThrow(
+                        ref layered,
+                        "layered-" + layerCount + "-" + layer,
+                        layeredDamage,
+                        layeredPenetration,
+                        aboveReference);
+                    layeredDamage = transition.OutputDamage;
+                    layeredPenetration = transition.OutputPenetrationPower;
+                }
+
+                AssertNear(
+                    "layer-count damage remains idempotent " + layerCount,
+                    115d * aboveReference.DamageFactor,
+                    layeredDamage);
+                AssertNear(
+                    "layer-count penetration remains idempotent " + layerCount,
+                    79.35d * aboveReference.PenetrationFactor,
+                    layeredPenetration);
+            }
+
+            BallisticNormalizationState zeroState = CreateRootNormalizationState(
+                "zero-component",
+                "zero-root");
+            BallisticFalloffFactors zeroFactors = CalculateOrThrow(0d, ReferenceSpeed);
+            BallisticNormalizationTransition zeroFirst = AdvanceNormalizationOrThrow(
+                ref zeroState,
+                "zero-layer-1",
+                115d,
+                79.35d,
+                zeroFactors);
+            AssertNear("zero-speed damage", 0d, zeroFirst.OutputDamage);
+            AssertNear("zero-speed penetration", 0d, zeroFirst.OutputPenetrationPower);
+            BallisticNormalizationTransition zeroSecond = AdvanceNormalizationOrThrow(
+                ref zeroState,
+                "zero-layer-2",
+                zeroFirst.OutputDamage,
+                zeroFirst.OutputPenetrationPower,
+                zeroFactors);
+            AssertNear("repeated zero-speed damage", 0d, zeroSecond.OutputDamage);
+            AssertNear("repeated zero-speed penetration", 0d, zeroSecond.OutputPenetrationPower);
         }
 
         private static void AssertFailure(
@@ -5313,6 +5706,69 @@ namespace BallisticPenetration.Validation
             }
 
             return factors;
+        }
+
+        private static BallisticNormalizationState CreateRootNormalizationState(
+            string componentId,
+            string rootShotId)
+        {
+            if (!BallisticNormalizationState.TryCreateRoot(
+                    componentId,
+                    rootShotId,
+                    out BallisticNormalizationState? state,
+                    out BallisticNormalizationFailureReason reason)
+                || state == null)
+            {
+                throw new InvalidOperationException(
+                    "Root normalization state creation failed: " + reason + ".");
+            }
+
+            return state;
+        }
+
+        private static BallisticNormalizationState CreatePhysicalNormalizationState(
+            string componentId,
+            string rootShotId,
+            BallisticFalloffFactors baselineFactors)
+        {
+            if (!BallisticNormalizationState.TryCreatePhysicalComponent(
+                    componentId,
+                    rootShotId,
+                    baselineFactors,
+                    out BallisticNormalizationState? state,
+                    out BallisticNormalizationFailureReason reason)
+                || state == null)
+            {
+                throw new InvalidOperationException(
+                    "Physical normalization state creation failed: " + reason + ".");
+            }
+
+            return state;
+        }
+
+        private static BallisticNormalizationTransition AdvanceNormalizationOrThrow(
+            ref BallisticNormalizationState state,
+            string collisionIdentity,
+            double currentDamage,
+            double currentPenetrationPower,
+            BallisticFalloffFactors factors)
+        {
+            if (!BallisticNormalizationCalculator.TryAdvance(
+                    state,
+                    collisionIdentity,
+                    currentDamage,
+                    currentPenetrationPower,
+                    factors,
+                    out BallisticNormalizationTransition? transition,
+                    out BallisticNormalizationFailureReason reason)
+                || transition == null)
+            {
+                throw new InvalidOperationException(
+                    "Normalization transition failed: " + reason + ".");
+            }
+
+            state = transition.NextState;
+            return transition;
         }
 
         private static void ValidateFullTemplateSweep(IReadOnlyList<BallisticTemplate> templates)
@@ -5376,6 +5832,67 @@ namespace BallisticPenetration.Validation
                     successfulCalculations,
                     abstractFallbackTemplates,
                     string.Join(", ", fallbackIds)));
+        }
+
+        private static void ValidateFullTemplateNormalizationSweep(
+            IReadOnlyList<BallisticTemplate> templates)
+        {
+            int positiveTemplates = 0;
+            int applications = 0;
+            foreach (BallisticTemplate template in templates)
+            {
+                if (template.InitialSpeed <= 0d || !IsFinite(template.InitialSpeed))
+                {
+                    continue;
+                }
+
+                positiveTemplates++;
+                foreach (double fraction in SweepFractions)
+                {
+                    BallisticFalloffFactors factors = CalculateOrThrow(
+                        template.InitialSpeed * fraction,
+                        template.InitialSpeed);
+                    BallisticNormalizationState state = CreateRootNormalizationState(
+                        template.Id + "-" + fraction.ToString("R", CultureInfo.InvariantCulture),
+                        template.Id);
+                    double damage = template.Damage;
+                    double penetration = template.PenetrationPower;
+                    for (int layer = 1; layer <= 6; layer++)
+                    {
+                        BallisticNormalizationTransition transition = AdvanceNormalizationOrThrow(
+                            ref state,
+                            template.Id + "-" + fraction.ToString("R", CultureInfo.InvariantCulture)
+                                + "-layer-" + layer,
+                            damage,
+                            penetration,
+                            factors);
+                        damage = transition.OutputDamage;
+                        penetration = transition.OutputPenetrationPower;
+                        AssertNear(
+                            template.InternalName + " normalized damage layer " + layer,
+                            template.Damage * factors.DamageFactor,
+                            damage);
+                        AssertNear(
+                            template.InternalName + " normalized penetration layer " + layer,
+                            template.PenetrationPower * factors.PenetrationFactor,
+                            penetration);
+                        applications++;
+                    }
+                }
+            }
+
+            AssertEqual("normalization sweep positive templates", 208, positiveTemplates);
+            AssertEqual(
+                "normalization sweep applications",
+                positiveTemplates * SweepFractions.Length * 6,
+                applications);
+            Console.WriteLine(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Normalization sweep: {0} positive templates x {1} fractions x 6 layers = {2} applications.",
+                    positiveTemplates,
+                    SweepFractions.Length,
+                    applications));
         }
 
         private static void ValidateUsTemplate(IReadOnlyList<BallisticTemplate> templates)

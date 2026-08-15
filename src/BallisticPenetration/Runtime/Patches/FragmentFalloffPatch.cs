@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using EFT.Ballistics;
+using EFT.InventoryLogic;
 using HarmonyLib;
 using SPT.Reflection.Patching;
 using BallisticPenetration.Core;
@@ -138,8 +139,68 @@ namespace BallisticPenetration.Runtime.Patches
                     return;
                 }
 
-                double adjustedDamage = context.EntryDamage * diagnosticFactors.DamageFactor;
-                double adjustedPenetrationPower = context.EntryPenetrationPower * diagnosticFactors.PenetrationFactor;
+                if (!ShotNormalizationBindingStore.TryGetOrCreateRoot(
+                        __instance,
+                        out ShotNormalizationBinding? normalizationBinding)
+                    || normalizationBinding == null)
+                {
+                    context.AdjustmentResult = CollisionAdjustmentResult.CalculationFailed;
+                    RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                    return;
+                }
+
+                string collisionIdentity = ShotNormalizationBindingStore.CreateCollisionIdentity(
+                    __instance,
+                    normalizationBinding.State);
+                if (!BallisticNormalizationCalculator.TryAdvance(
+                        normalizationBinding.State,
+                        collisionIdentity,
+                        context.EntryDamage,
+                        context.EntryPenetrationPower,
+                        diagnosticFactors,
+                        out BallisticNormalizationTransition? normalizationTransition,
+                        out _)
+                    || normalizationTransition == null)
+                {
+                    context.AdjustmentResult = CollisionAdjustmentResult.CalculationFailed;
+                    RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                    return;
+                }
+
+                CaptureNormalization(context, normalizationTransition, collisionIdentity);
+                if (normalizationTransition.Disposition
+                    == BallisticNormalizationDisposition.Duplicate)
+                {
+                    context.LocalOutputDamage = __instance.Damage;
+                    context.LocalOutputPenetrationPower = __instance.PenetrationPower;
+                    context.AdjustmentResult = CollisionAdjustmentResult.DuplicateNormalization;
+                    RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                    return;
+                }
+
+                if (normalizationTransition.Disposition
+                    == BallisticNormalizationDisposition.PhysicalCapabilityBypass)
+                {
+                    if (!ShotNormalizationBindingStore.TryCommit(
+                            __instance,
+                            normalizationBinding,
+                            normalizationTransition.NextState,
+                            out _))
+                    {
+                        context.AdjustmentResult = CollisionAdjustmentResult.CalculationFailed;
+                        RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                        return;
+                    }
+
+                    context.LocalOutputDamage = __instance.Damage;
+                    context.LocalOutputPenetrationPower = __instance.PenetrationPower;
+                    context.AdjustmentResult = CollisionAdjustmentResult.PhysicalCapabilityOwned;
+                    RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                    return;
+                }
+
+                double adjustedDamage = normalizationTransition.OutputDamage;
+                double adjustedPenetrationPower = normalizationTransition.OutputPenetrationPower;
                 float damage = (float)adjustedDamage;
                 float penetrationPower = (float)adjustedPenetrationPower;
                 if (!IsFiniteNonNegative(adjustedDamage)
@@ -152,18 +213,36 @@ namespace BallisticPenetration.Runtime.Patches
                     return;
                 }
 
-                // Replace the stock result with the uncapped velocity curve.
+                // Replace only the speed-curve portion already represented in the cumulative
+                // statistics. Armor CF, material loss, and child multipliers remain intact.
                 __instance.Damage = damage;
                 __instance.PenetrationPower = penetrationPower;
+                if (!ShotNormalizationBindingStore.TryCommit(
+                        __instance,
+                        normalizationBinding,
+                        normalizationTransition.NextState,
+                        out _))
+                {
+                    __instance.Damage = context.PatchInputDamage;
+                    __instance.PenetrationPower = context.PatchInputPenetrationPower;
+                    context.AdjustmentResult = CollisionAdjustmentResult.CalculationFailed;
+                    RecordDiagnostic(__instance, context, impactSpeed, diagnosticFactors);
+                    return;
+                }
+
                 context.LocalOutputDamage = damage;
                 context.LocalOutputPenetrationPower = penetrationPower;
                 context.AdjustmentResult = CollisionAdjustmentResult.Applied;
 
                 if (configuration.EnableExperimentalPhysicalProjectiles.Value)
                 {
-                    PhysicalProjectileRuntime.TryPrepareRootCollision(
+                    bool prepared = PhysicalProjectileRuntime.TryPrepareRootCollision(
                         __instance,
                         out __state);
+                    if (!prepared)
+                    {
+                        Plugin.LogPhysicalBridgeFallback("root-prepare", __instance);
+                    }
                 }
 
                 // Record the values written by this patch.
@@ -180,7 +259,15 @@ namespace BallisticPenetration.Runtime.Patches
                         __instance.Damage,
                         __instance.PenetrationPower,
                         diagnosticFactors.DamageFactor,
-                        diagnosticFactors.PenetrationFactor);
+                        diagnosticFactors.PenetrationFactor,
+                        context.NormalizationComponentId,
+                        context.NormalizationRootShotId,
+                        context.NormalizationCollisionId,
+                        context.NormalizationCollisionOrdinal,
+                        context.PreviousDamageFactor,
+                        context.PreviousPenetrationFactor,
+                        context.AppliedDamageRatio,
+                        context.AppliedPenetrationRatio);
                 }
             }
             catch (Exception exception)
@@ -196,7 +283,7 @@ namespace BallisticPenetration.Runtime.Patches
         }
 
         [PatchPostfix]
-        [HarmonyPriority(Priority.Last)]
+        [HarmonyPriority(Priority.First)]
         [SuppressMessage(
             "Design",
             "CA1031:Do not catch general exception types",
@@ -209,15 +296,25 @@ namespace BallisticPenetration.Runtime.Patches
             {
                 PluginConfiguration? configuration = Plugin.Configuration;
                 if (__instance == null
-                    || __state == null
                     || configuration == null
-                    || !configuration.Enabled.Value
-                    || !configuration.EnableExperimentalPhysicalProjectiles.Value)
+                    || !configuration.Enabled.Value)
                 {
                     return;
                 }
 
-                PhysicalProjectileRuntime.TryApplyObservedOutcome(__instance, __state);
+                if (__state != null
+                    && configuration.EnableExperimentalPhysicalProjectiles.Value)
+                {
+                    bool applied = PhysicalProjectileRuntime.TryApplyObservedOutcome(
+                        __instance,
+                        __state);
+                    if (!applied)
+                    {
+                        Plugin.LogPhysicalBridgeFallback("outcome-apply", __instance);
+                    }
+                }
+
+                PropagateNormalizationToChildren(__instance, configuration);
             }
             catch (Exception exception)
             {
@@ -232,6 +329,88 @@ namespace BallisticPenetration.Runtime.Patches
             BallisticFalloffFactors factors)
         {
             DiagnosticsRuntime.TryRecordAdjustment(shot, context, impactSpeed, factors);
+        }
+
+        private static void CaptureNormalization(
+            CollisionContext context,
+            BallisticNormalizationTransition transition,
+            string collisionIdentity)
+        {
+            context.NormalizationComponentId = transition.NextState.ComponentId;
+            context.NormalizationRootShotId = transition.NextState.RootShotId;
+            context.NormalizationCollisionId = collisionIdentity;
+            context.NormalizationCollisionOrdinal = transition.CollisionOrdinal;
+            context.PreviousDamageFactor = transition.PreviousDamageFactor;
+            context.PreviousPenetrationFactor = transition.PreviousPenetrationFactor;
+            context.CurrentDamageFactor = transition.CurrentDamageFactor;
+            context.CurrentPenetrationFactor = transition.CurrentPenetrationFactor;
+            context.AppliedDamageRatio = transition.AppliedDamageRatio;
+            context.AppliedPenetrationRatio = transition.AppliedPenetrationRatio;
+        }
+
+        private static void PropagateNormalizationToChildren(
+            Shot parent,
+            PluginConfiguration configuration)
+        {
+            if (!ShotNormalizationBindingStore.TryGet(
+                    parent,
+                    out ShotNormalizationBinding? parentBinding)
+                || parentBinding == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < parent.Fragments.Count; index++)
+            {
+                Shot child = parent.Fragments[index];
+                if (child == null)
+                {
+                    continue;
+                }
+
+                if (PhysicalShotBindingStore.TryGet(
+                        child,
+                        out PhysicalShotBinding? physicalBinding)
+                    && physicalBinding != null)
+                {
+                    BallisticFalloffFactors baselineFactors =
+                        CalculatePhysicalBaseline(child, configuration);
+                    ShotNormalizationBindingStore.TrySetPhysicalComponent(
+                        child,
+                        physicalBinding.State,
+                        baselineFactors);
+                }
+                else
+                {
+                    ShotNormalizationBindingStore.TrySetDerivedChild(
+                        child,
+                        parentBinding.State);
+                }
+            }
+        }
+
+        private static BallisticFalloffFactors CalculatePhysicalBaseline(
+            Shot child,
+            PluginConfiguration configuration)
+        {
+            AmmoTemplate? template = child.Ammo?.Template as AmmoTemplate;
+            if (template == null
+                || !configuration.TryGetExponentValues(
+                    out double penetrationExponent,
+                    out double damageExponent)
+                || !BallisticFalloffCalculator.TryCalculate(
+                    child.CurrentVelocity.magnitude,
+                    template.InitialSpeed,
+                    new FalloffExponentConfiguration(
+                        penetrationExponent,
+                        damageExponent),
+                    out BallisticFalloffFactors factors,
+                    out _))
+            {
+                return BallisticFalloffFactors.NeutralFallback;
+            }
+
+            return factors;
         }
 
         private static bool IsValidImpactSpeed(float value)

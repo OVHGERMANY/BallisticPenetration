@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using BepInEx;
@@ -8,10 +9,13 @@ using BepInEx.Bootstrap;
 using BepInEx.Logging;
 using HarmonyLib;
 using BallisticPenetration.Core;
+using BallisticPenetration.Core.Physics;
 using BallisticPenetration.Runtime;
 using BallisticPenetration.Runtime.Diagnostics;
 using BallisticPenetration.Runtime.Patches;
 using BallisticPenetration.Runtime.Rendering;
+using BallisticPenetration.Runtime.State;
+using EFT.Ballistics;
 
 namespace BallisticPenetration
 {
@@ -192,7 +196,15 @@ namespace BallisticPenetration
             float adjustedDamage,
             float adjustedPenetrationPower,
             double damageFactor,
-            double penetrationFactor)
+            double penetrationFactor,
+            string componentId,
+            string rootShotId,
+            string collisionId,
+            int collisionOrdinal,
+            double previousDamageFactor,
+            double previousPenetrationFactor,
+            double appliedDamageRatio,
+            double appliedPenetrationRatio)
         {
             try
             {
@@ -201,18 +213,208 @@ namespace BallisticPenetration
                 {
                     logger.LogInfo(
                         "Applied ballistic falloff: ammo=" + ammoTemplateId
+                        + ", component=" + componentId
+                        + ", root=" + rootShotId
+                        + ", transition=" + collisionId
+                        + ", ordinal=" + collisionOrdinal
                         + ", impact=" + impactSpeed
                         + ", template=" + templateSpeed
                         + ", damage=" + preCollisionDamage + " -> " + adjustedDamage
-                        + " (factor " + damageFactor + ")"
+                        + " (previous " + previousDamageFactor
+                        + ", current " + damageFactor
+                        + ", applied " + appliedDamageRatio + ")"
                         + ", penetration=" + preCollisionPenetrationPower + " -> " + adjustedPenetrationPower
-                        + " (factor " + penetrationFactor + ").");
+                        + " (previous " + previousPenetrationFactor
+                        + ", current " + penetrationFactor
+                        + ", applied " + appliedPenetrationRatio + ").");
                 }
             }
             catch
             {
                 // Optional diagnostics must not affect a live collision.
             }
+        }
+
+        internal static void LogPhysicalTransitionPrepared(
+            Shot shot,
+            PhysicalRuntimeCollisionState collisionState)
+        {
+            ManualLogSource? logger = Log;
+            PluginConfiguration? configuration = Configuration;
+            if (logger == null
+                || configuration == null
+                || !configuration.LogAdjustments.Value
+                || shot == null
+                || collisionState == null)
+            {
+                return;
+            }
+
+            PhysicalProjectileState parent = collisionState.ParentState;
+            string normalizationOwnership = "unbound";
+            double previousDamageFactor = 1d;
+            double previousPenetrationFactor = 1d;
+            if (ShotNormalizationBindingStore.TryGet(
+                    shot,
+                    out ShotNormalizationBinding? normalizationBinding)
+                && normalizationBinding != null)
+            {
+                normalizationOwnership = normalizationBinding.State.Ownership.ToString();
+                previousDamageFactor = normalizationBinding.State.RepresentedDamageFactor;
+                previousPenetrationFactor =
+                    normalizationBinding.State.RepresentedPenetrationFactor;
+            }
+
+            BallisticFalloffFactors currentFactors = CalculateAbsoluteSpeedFactors(shot);
+            logger.LogInfo(
+                "Physical transition prepared: transition=" + collisionState.TransitionId
+                + ", projectile=" + parent.ProjectileId
+                + ", root=" + parent.RootShotId
+                + ", ordinal=" + parent.CollisionHistory.Count
+                + ", preparedVelocity=" + FormatVector(parent.VelocityMetresPerSecond)
+                + ", preparedSpeed=" + FormatDouble(parent.SpeedMetresPerSecond)
+                + ", preparedEnergy=" + FormatDouble(parent.TranslationalKineticEnergyJoules)
+                + ", retainedMass=" + FormatDouble(parent.RetainedMassKilograms)
+                + ", capturedVelocity=("
+                + FormatDouble(shot.CurrentVelocity.x) + ","
+                + FormatDouble(shot.CurrentVelocity.y) + ","
+                + FormatDouble(shot.CurrentVelocity.z) + ")"
+                + ", capturedSpeed=" + FormatDouble(shot.CurrentVelocity.magnitude)
+                + ", damage=" + FormatDouble(collisionState.ParentEftDamage)
+                + ", penetration=" + FormatDouble(
+                    collisionState.ParentEftPenetrationPower)
+                + ", normalizationOwnership=" + normalizationOwnership
+                + ", previousDamageFactor=" + FormatDouble(previousDamageFactor)
+                + ", currentDamageFactor=" + FormatDouble(currentFactors.DamageFactor)
+                + ", previousPenetrationFactor=" + FormatDouble(
+                    previousPenetrationFactor)
+                + ", currentPenetrationFactor=" + FormatDouble(
+                    currentFactors.PenetrationFactor)
+                + ".");
+        }
+
+        internal static void LogPhysicalComponentProjected(
+            PhysicalRuntimeCollisionState collisionState,
+            PhysicalProjectileState component,
+            PhysicalEftProjectileProjection projection,
+            Shot child)
+        {
+            ManualLogSource? logger = Log;
+            PluginConfiguration? configuration = Configuration;
+            if (logger == null
+                || configuration == null
+                || !configuration.LogAdjustments.Value
+                || collisionState == null
+                || component == null
+                || projection == null
+                || child == null)
+            {
+                return;
+            }
+
+            BallisticFalloffFactors componentFactors = CalculateAbsoluteSpeedFactors(child);
+            logger.LogInfo(
+                "Physical component projected: transition=" + collisionState.TransitionId
+                + ", projectile=" + component.ProjectileId
+                + ", root=" + component.RootShotId
+                + ", ordinal=" + component.CollisionHistory.Count
+                + ", kind=" + component.Kind
+                + ", resolvedVelocity=" + FormatVector(component.VelocityMetresPerSecond)
+                + ", resolvedSpeed=" + FormatDouble(component.SpeedMetresPerSecond)
+                + ", resolvedEnergy=" + FormatDouble(
+                    component.TranslationalKineticEnergyJoules)
+                + ", retainedMass=" + FormatDouble(component.RetainedMassKilograms)
+                + ", projectedSpeed=" + FormatDouble(projection.SpeedMetresPerSecond)
+                + ", shotVelocity=("
+                + FormatDouble(child.CurrentVelocity.x) + ","
+                + FormatDouble(child.CurrentVelocity.y) + ","
+                + FormatDouble(child.CurrentVelocity.z) + ")"
+                + ", shotSpeed=" + FormatDouble(child.CurrentVelocity.magnitude)
+                + ", damage=" + FormatDouble(child.Damage)
+                + ", penetration=" + FormatDouble(child.PenetrationPower)
+                + ", normalizationOwnership="
+                + BallisticNormalizationOwnership.PhysicalCapability
+                + ", baselineDamageFactor=" + FormatDouble(componentFactors.DamageFactor)
+                + ", baselinePenetrationFactor=" + FormatDouble(
+                    componentFactors.PenetrationFactor)
+                + ".");
+        }
+
+        internal static void LogPhysicalBridgeFallback(string stage, Shot shot)
+        {
+            ManualLogSource? logger = Log;
+            PluginConfiguration? configuration = Configuration;
+            if (logger == null
+                || configuration == null
+                || !configuration.LogAdjustments.Value
+                || shot == null)
+            {
+                return;
+            }
+
+            string componentId = "unbound";
+            string rootId = "unbound";
+            int ordinal = 0;
+            if (ShotNormalizationBindingStore.TryGet(
+                    shot,
+                    out ShotNormalizationBinding? normalizationBinding)
+                && normalizationBinding != null)
+            {
+                componentId = normalizationBinding.State.ComponentId;
+                rootId = normalizationBinding.State.RootShotId;
+                ordinal = normalizationBinding.State.CollisionOrdinal;
+            }
+
+            logger.LogInfo(
+                "Physical bridge fallback: stage=" + stage
+                + ", component=" + componentId
+                + ", root=" + rootId
+                + ", ordinal=" + ordinal
+                + ", fireIndex=" + shot.FireIndex
+                + ", randomSeed=" + shot.RandomSeed
+                + ", fragmentIndex=" + shot.FragmentIndex
+                + ", capturedSpeed=" + FormatDouble(shot.CurrentVelocity.magnitude)
+                + ", damage=" + FormatDouble(shot.Damage)
+                + ", penetration=" + FormatDouble(shot.PenetrationPower)
+                + ".");
+        }
+
+        private static string FormatVector(PhysicalVector3 value)
+        {
+            return "("
+                + FormatDouble(value.X) + ","
+                + FormatDouble(value.Y) + ","
+                + FormatDouble(value.Z) + ")";
+        }
+
+        private static BallisticFalloffFactors CalculateAbsoluteSpeedFactors(Shot shot)
+        {
+            PluginConfiguration? configuration = Configuration;
+            EFT.InventoryLogic.AmmoTemplate? template =
+                shot.Ammo?.Template as EFT.InventoryLogic.AmmoTemplate;
+            if (configuration == null
+                || template == null
+                || !configuration.TryGetExponentValues(
+                    out double penetrationExponent,
+                    out double damageExponent)
+                || !BallisticFalloffCalculator.TryCalculate(
+                    shot.CurrentVelocity.magnitude,
+                    template.InitialSpeed,
+                    new FalloffExponentConfiguration(
+                        penetrationExponent,
+                        damageExponent),
+                    out BallisticFalloffFactors factors,
+                    out _))
+            {
+                return BallisticFalloffFactors.NeutralFallback;
+            }
+
+            return factors;
+        }
+
+        private static string FormatDouble(double value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
         }
 
         private void EnablePatchesTransactionally()

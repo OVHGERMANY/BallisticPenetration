@@ -145,6 +145,7 @@ namespace BallisticPenetration.Runtime
                 impactState.SpeedMetresPerSecond / binding.State.SpeedMetresPerSecond,
                 penetrationRatio,
                 damageRatio);
+            Plugin.LogPhysicalTransitionPrepared(shot, collisionState);
             PhysicalProjectileTelemetryRuntime.PublishPrepared(shot, collisionState);
             return PhysicalBoundFlightResult.Applied;
         }
@@ -205,6 +206,7 @@ namespace BallisticPenetration.Runtime
                 out collisionState);
             if (prepared && collisionState != null)
             {
+                Plugin.LogPhysicalTransitionPrepared(shot, collisionState);
                 PhysicalProjectileTelemetryRuntime.PublishPrepared(shot, collisionState);
             }
 
@@ -584,6 +586,11 @@ namespace BallisticPenetration.Runtime
                         child.PenetrationPower,
                         child.BallisticCoefficient);
                     bindings.Add(binding);
+                    Plugin.LogPhysicalComponentProjected(
+                        collisionState,
+                        component,
+                        projection,
+                        child);
                 }
 
                 complete = replacements.Count == components.Count;
