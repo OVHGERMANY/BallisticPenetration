@@ -19,6 +19,7 @@ namespace BallisticPenetration.Runtime.Patches
     internal sealed class FragmentFalloffPatch : ModulePatch
     {
         internal const string HarmonyOwnerId = "com.janky.ballisticpenetration.fragment-falloff";
+        private const int PhysicalCommitPostfixPriority = Priority.Last - 100;
 
         private readonly MethodInfo _target;
 
@@ -283,7 +284,7 @@ namespace BallisticPenetration.Runtime.Patches
         }
 
         [PatchPostfix]
-        [HarmonyPriority(Priority.First)]
+        [HarmonyPriority(PhysicalCommitPostfixPriority)]
         [SuppressMessage(
             "Design",
             "CA1031:Do not catch general exception types",
