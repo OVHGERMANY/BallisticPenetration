@@ -2,6 +2,10 @@
 
 Standalone SPT 4.1.2 client plugin for uncapped, impact-speed-based terminal ballistics.
 
+The current development build is a public experimental alpha. Installation, testing,
+privacy, rollback, compatibility, and confirmed-issue guidance is under
+[`docs/community-alpha`](docs/community-alpha/TESTING_GUIDE.md).
+
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
 and requires its version to equal `4.1.2` exactly before resolving targets or enabling
 any of its four Harmony patches. The hard `BepInDependency` remains for load ordering
@@ -94,7 +98,7 @@ struck target, including target-spall fragments created at a later collision. Tr
 validation rejects parent-mass over-allocation, child energy above the residual collision
 budget, mixed parent/root/collision lineage, duplicate component identities, non-finite
 state, and fragmentation events with no physical parent fragment. A fixed PCG random
-stream is provided for later deformation and fragmentation calculations.
+stream drives deterministic deformation, fragmentation, spall, and child-shot seed allocation.
 
 The development tree also contains a deterministic deformation and material-response
 solver. It accepts construction-specific projectile properties, target resistance
@@ -129,10 +133,12 @@ same pooled `Shot` object for another projectile.
 The runtime has conservative development profiles for projectile construction and EFT world,
 body, and armor material classes. These are deterministic engineering estimates derived from
 the limited fields exposed by EFT; they are not manufacturer metallurgy or certification data.
-Single-projectile large-caliber ammunition remains eligible when EFT's grenade-component fields
-describe only a visual impact effect: explosive strength, fragment count, fuse time, and blast
-distance must all be zero. Multi-projectile loads and mechanically explosive ammunition remain
-outside the physical path.
+An exact SPT 4.1.2 catalog classifies all 208 positive-speed ammunition templates by construction,
+terminal design, and initial shape. It admits 185 kinetic templates and explicitly rejects 23
+payload templates from physical-projectile replacement. Shot and flechette loads are modeled per
+EFT projectile, including their distinct spherical or dart geometry. Large-caliber kinetic rounds
+remain eligible even when EFT also attaches visual-impact metadata. Unknown template identities
+fail open instead of receiving a guessed construction.
 An optional schema-1 reflection contract allows any collider to provide a canonical physical
 material class and opaque surface identity without a compile-time assembly reference. Invalid
 metadata leaves the host collision untouched. The built-in profiles distinguish titanium from
@@ -152,9 +158,10 @@ collision state. Target spall can itself deform and fragment at a later target w
 reclassified as bullet mass.
 
 The physical path now includes dedicated post-impact geometry for intact and deformed projectiles,
-projectile fragments, and target-generated spall. Eight deterministic low-poly shape classes cover
-spitzer, round-nose, flat-nose, mushroomed, flattened, irregular-fragment, spall-flake, and
-spall-chunk states. Mesh scale comes from each component's calculated diameter and length. Physical
+projectile fragments, and target-generated spall. Ten deterministic low-poly shape classes cover
+spitzer, round-nose, flat-nose, mushroomed, flattened, irregular-fragment, spall-flake, spall-chunk,
+spherical-shot, and flechette states. Mesh scale comes from each component's calculated diameter
+and length. Physical
 yaw is applied around a deterministic azimuth, while moving geometry follows the exact pooled EFT
 shot only while its binding identity remains current.
 
@@ -165,10 +172,11 @@ or mutate Unity objects. The default dimension scale is one and the default mini
 is zero, so calculated component size is preserved unless the user deliberately enables visual-only
 enlargement.
 
-The physical runtime also exposes an optional, versioned transition telemetry boundary. It publishes
+The physical runtime also exposes an optional schema-2 transition telemetry boundary. It publishes
 immutable prepared and resolved collision records through BCL-only subscription methods, so an
 external development tool can observe complete SI state without a compile-time dependency. Records
-include copied shot lineage, measured impact geometry, target profile, parent and output components,
+include copied shot lineage, measured impact geometry, target profile, projectile design,
+parent and output components,
 separate projectile-derived and fresh target-spall mass, declared losses, residual/output energy,
 closure error, and an optional opaque target-surface identity. No pooled host or Unity object is
 retained. With no subscriber, the collision path

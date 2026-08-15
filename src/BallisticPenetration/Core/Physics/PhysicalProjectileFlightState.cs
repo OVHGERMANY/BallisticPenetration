@@ -126,6 +126,7 @@ namespace BallisticPenetration.Core.Physics
                 FragmentGeneration = current.FragmentGeneration,
                 DeterministicSeed = current.DeterministicSeed,
                 Construction = current.Construction,
+                DesignClass = current.DesignClass,
                 ShapeClass = current.ShapeClass,
                 OriginalMassKilograms = current.OriginalMassKilograms,
                 RetainedMassKilograms = current.RetainedMassKilograms,

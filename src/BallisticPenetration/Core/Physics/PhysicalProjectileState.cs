@@ -44,7 +44,8 @@ namespace BallisticPenetration.Core.Physics
         MaterialOriginMismatch = 32,
         DamageCapabilityExceedsEnergy = 33,
         CollisionSequenceMismatch = 34,
-        AttitudeYawMismatch = 35
+        AttitudeYawMismatch = 35,
+        DesignClassInvalid = 36
     }
 
     /// <summary>
@@ -84,6 +85,8 @@ namespace BallisticPenetration.Core.Physics
         public ulong DeterministicSeed { get; set; }
 
         public PhysicalProjectileConstruction Construction { get; set; }
+
+        public PhysicalProjectileDesignClass DesignClass { get; set; }
 
         public PhysicalProjectileShapeClass ShapeClass { get; set; }
 
@@ -140,7 +143,7 @@ namespace BallisticPenetration.Core.Physics
     /// </summary>
     public sealed class PhysicalProjectileState
     {
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
 
         private const double RestSpeedToleranceMetresPerSecond = 0.000000001d;
         private const double AttitudeYawToleranceRadians = 0.000001d;
@@ -170,6 +173,7 @@ namespace BallisticPenetration.Core.Physics
             FragmentGeneration = input.FragmentGeneration;
             DeterministicSeed = input.DeterministicSeed;
             Construction = input.Construction;
+            DesignClass = input.DesignClass;
             ShapeClass = input.ShapeClass;
             OriginalMassKilograms = input.OriginalMassKilograms;
             RetainedMassKilograms = input.RetainedMassKilograms;
@@ -226,6 +230,8 @@ namespace BallisticPenetration.Core.Physics
         public ulong DeterministicSeed { get; }
 
         public PhysicalProjectileConstruction Construction { get; }
+
+        public PhysicalProjectileDesignClass DesignClass { get; }
 
         public PhysicalProjectileShapeClass ShapeClass { get; }
 
@@ -344,16 +350,23 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (input.ShapeClass < PhysicalProjectileShapeClass.Spitzer
-                || input.ShapeClass > PhysicalProjectileShapeClass.TargetSpallChunk)
+                || input.ShapeClass > PhysicalProjectileShapeClass.Flechette)
             {
                 failureReason = PhysicalProjectileStateFailureReason.ShapeClassInvalid;
                 return false;
             }
 
-            if (input.Construction < PhysicalProjectileConstruction.Unknown
-                || input.Construction > PhysicalProjectileConstruction.TargetMaterial)
+            if (input.Construction <= PhysicalProjectileConstruction.Unknown
+                || input.Construction > PhysicalProjectileConstruction.MonolithicLead)
             {
                 failureReason = PhysicalProjectileStateFailureReason.ConstructionInvalid;
+                return false;
+            }
+
+            if (input.DesignClass <= PhysicalProjectileDesignClass.Unknown
+                || input.DesignClass > PhysicalProjectileDesignClass.Flechette)
+            {
+                failureReason = PhysicalProjectileStateFailureReason.DesignClassInvalid;
                 return false;
             }
 
@@ -365,7 +378,9 @@ namespace BallisticPenetration.Core.Physics
                 == PhysicalProjectileShapeClass.TargetSpallFlake
                 || input.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk;
             if (isTargetMaterialFragment != hasTargetMaterialConstruction
-                || isTargetMaterialFragment != hasTargetSpallShape)
+                || isTargetMaterialFragment != hasTargetSpallShape
+                || (isTargetMaterialFragment
+                    && input.DesignClass != PhysicalProjectileDesignClass.Fragment))
             {
                 failureReason = PhysicalProjectileStateFailureReason.MaterialOriginMismatch;
                 return false;

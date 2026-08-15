@@ -159,13 +159,12 @@ namespace BallisticPenetration.Runtime
                 || !PhysicalRuntimeProfileResolver.TryResolveProjectile(
                     shot,
                     out PhysicalProjectileMaterialProfile? projectileProfile,
+                    out PhysicalProjectileDesignClass designClass,
                     out PhysicalProjectileShapeClass shapeClass,
-                    out double dragCoefficient)
-                || projectileProfile == null
-                || !TryConvertMassToKilograms(shot.BulletMassGram, out double massKilograms)
-                || !TryConvertDiameterToMetres(
-                    shot.BulletDiameterMilimeters,
-                    out double diameterMetres))
+                    out double dragCoefficient,
+                    out double massKilograms,
+                    out double diameterMetres)
+                || projectileProfile == null)
             {
                 return false;
             }
@@ -177,6 +176,7 @@ namespace BallisticPenetration.Runtime
                 RootShotId = rootId,
                 DeterministicSeed = CreateDeterministicSeed(shot),
                 Construction = projectileProfile.Construction,
+                DesignClass = designClass,
                 ShapeClass = shapeClass,
                 MassKilograms = massKilograms,
                 NominalDiameterMetres = diameterMetres,
@@ -654,7 +654,9 @@ namespace BallisticPenetration.Runtime
             child = Shot.Create(
                 parent.Ammo,
                 fragmentIndex,
-                unchecked((int)(uint)component.DeterministicSeed),
+                PhysicalHostRandomSeed.Map(
+                    component.DeterministicSeed,
+                    BallisticsCalculator.RND_COUNT),
                 position,
                 direction,
                 speed,
@@ -844,20 +846,6 @@ namespace BallisticPenetration.Runtime
 
             ratio = currentValue / referenceValue;
             return IsFiniteNonNegative(ratio);
-        }
-
-        private static bool TryConvertMassToKilograms(float massGrams, out double massKilograms)
-        {
-            massKilograms = massGrams / 1000d;
-            return IsFinitePositive(massKilograms);
-        }
-
-        private static bool TryConvertDiameterToMetres(
-            float diameterMillimetres,
-            out double diameterMetres)
-        {
-            diameterMetres = diameterMillimetres / 1000d;
-            return IsFinitePositive(diameterMetres);
         }
 
         private static bool TryConvertFinitePositive(double value, out float converted)

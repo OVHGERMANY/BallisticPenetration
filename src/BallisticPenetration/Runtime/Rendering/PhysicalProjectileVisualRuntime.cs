@@ -486,7 +486,7 @@ namespace BallisticPenetration.Runtime.Rendering
         private static bool CreateMeshes()
         {
             for (PhysicalProjectileShapeClass shape = PhysicalProjectileShapeClass.Spitzer;
-                 shape <= PhysicalProjectileShapeClass.TargetSpallChunk;
+                 shape <= PhysicalProjectileShapeClass.Flechette;
                  shape++)
             {
                 if (!PhysicalProjectileVisualGeometry.TryCreateUnitMesh(
@@ -552,6 +552,11 @@ namespace BallisticPenetration.Runtime.Rendering
             AddMaterial(PhysicalVisualMaterialKey.TargetMineral, shader, new Color(0.40f, 0.36f, 0.31f, 1f));
             AddMaterial(PhysicalVisualMaterialKey.TargetOrganic, shader, new Color(0.36f, 0.22f, 0.14f, 1f));
             AddMaterial(PhysicalVisualMaterialKey.TargetOther, shader, new Color(0.35f, 0.37f, 0.35f, 1f));
+            AddMaterial(PhysicalVisualMaterialKey.Aluminum, shader, new Color(0.62f, 0.65f, 0.68f, 1f));
+            AddMaterial(PhysicalVisualMaterialKey.Brass, shader, new Color(0.62f, 0.48f, 0.16f, 1f));
+            AddMaterial(PhysicalVisualMaterialKey.Zinc, shader, new Color(0.50f, 0.54f, 0.57f, 1f));
+            AddMaterial(PhysicalVisualMaterialKey.NonMetallic, shader, new Color(0.20f, 0.28f, 0.36f, 1f));
+            AddMaterial(PhysicalVisualMaterialKey.Lead, shader, new Color(0.30f, 0.31f, 0.34f, 1f));
             return true;
         }
 

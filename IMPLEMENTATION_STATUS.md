@@ -1,174 +1,103 @@
 # BallisticPenetration implementation status
 
-Snapshot date: 2026-08-14
+Snapshot date: 2026-08-15
 
-## Current development build
+## Community alpha candidate
 
-- Plugin version: `1.2.1`
+- Plugin version: `1.3.0`
+- Planned prerelease tag: `v1.3.0-alpha.1`
 - Supported environment: SPT `4.1.2`, EFT `0.16.9.40743`
-- Production systems: exact collision-point velocity falloff, uncapped damage and penetration
-  curves, cumulative multi-surface scaling, EFT armor integration, and postmortem armor
-  durability processing
-- Experimental physical runtime: connected to host-confirmed collision outcomes behind a
-  default-off configuration gate; implemented offline and now in the final integrated game-test
-  campaign
-- Version `1.2.1` contains the first two runtime-proven corrections and is installed for the next
-  user-led campaign session. Its DLL hash matches the validated development package; the game was
-  not launched during installation
+- Release target: `netstandard2.1`
+- Physical projectile state schema: `2`
+- Physical transition publisher schema: `2`
+- Experimental physical projectiles: disabled by default
 
-## Physical-state development baseline
+The ordinary gameplay path scales current terminal damage and penetration from exact impact
+velocity, applies the result before EFT makes its existing armor and continuation decisions, and
+preserves cumulative multi-surface and armor-CF behavior. Covered post-death hits can forward the
+already-decided shot into EFT's existing armor-durability calculation without replaying health,
+death, armor-penetration, or ricochet decisions.
 
-- State schema: `1`
-- Supported component kinds: intact projectile, deformed projectile, projectile fragment,
-  and target-generated spall
-- Units: kilograms, metres, seconds, radians, joules, kilogram-metres per second for
-  momentum, square metres, and kilograms per square metre for physical ballistic coefficient
-- Immutable state includes component geometry, mass, drag, orientation, yaw/tumble,
-  velocity, momentum, energy, physical capability, lineage, source material/collision,
-  collision history, terminal state, and render disposition
-- Component ballistic coefficient is derived from that component's retained mass, projected
-  area, and drag coefficient; it is not copied from a parent projectile
-- Projectile mass and target-spall mass are accounted separately
-- Conservation validation bounds projectile allocation and all child kinetic energy after
-  penetration, deformation, fracture, heat, and other declared losses
-- Fragmentation validation rejects a nominal fragmentation event with no physical
-  projectile fragment
-- Fixed seed and stream use the stable PCG-XSH-RR sequence
-- Invalid state returns a typed failure and no physical object; the caller can leave EFT
-  state untouched
+## Complete ammunition catalog
 
-## Conserved fragmentation and target spall
+The exact SPT 4.1.2 catalog resolves all `208` positive-speed ammunition templates:
 
-- Pure solver: `PhysicalFragmentationSolver.TrySolve`
-- It runs only after a host-confirmed fragmentation outcome and consumes the observed host
-  fragment count without invoking EFT decision or random methods
-- Reserved projectile mass and energy are deterministically partitioned into component-specific
-  projectile fragments; a zero host count remains recorded and still produces the one minimum
-  physical fragment required to close nonzero reservations
-- Retained primary projectile mass, projectile fragments, and target-generated spall remain
-  separate outputs with distinct mass, energy, material origin, shape, drag, direction, lineage,
-  and history
-- Target-spall kinetic energy is reclassified from penetration work rather than added to the
-  collision energy budget
-- Every child receives its own mass, equivalent diameter, projected area, length, aspect ratio,
-  drag, velocity, momentum, energy, penetration capability, damage capability, orientation,
-  fragment index, generation, source collision, and render state
-- Mass and energy closure is revalidated after component construction
+- `185` kinetic projectile templates enter the physical-projectile path when it is enabled.
+- `23` payload templates are explicitly classified and fail open to EFT's existing handling.
+- No positive-speed template is unresolved.
+- Every entry declares construction, terminal design, and initial physical shape.
+- Shot and flechette loads are handled per EFT projectile rather than being rejected as a class.
+- Wave-R supplies catalog fallback mass and diameter because its installed template omits both.
+- Unknown or changed template identities are not guessed.
 
-## Individual-flight integration boundary
+Construction profiles include jacketed lead, steel, tungsten, aluminum, and mixed penetrator/core
+designs; monolithic copper, brass, zinc, steel, and lead; frangible and nonmetallic composites; and
+target-derived material. Terminal design response distinguishes full-metal-jacket, semi-jacketed,
+hollow-point, soft-point, expanding, polymer-tipped, open-tip, sabot, exposed penetrator,
+frangible, solid, fragment, shot, and flechette projectiles.
 
-- Root factory: `PhysicalRootProjectileFactory.TryCreate`
-- It derives frontal area, equivalent cylinder length, orientation, kinetic energy, and physical
-  capabilities from measured mass, diameter, density, position, and velocity without substituting
-  EFT damage or penetration stats for SI geometry
-- Pure projector: `PhysicalEftProjectileProjector.TryProject`
-- A component maps to EFT mass in grams, equivalent diameter in millimetres, speed, direction,
-  relative G1 coefficient, damage, and penetration without inheriting whole-projectile mass,
-  diameter, or drag
-- Projection preserves an explicitly measured EFT target/armor transfer multiplier while
-  replacing EFT's placeholder fragment share with the physical capability share
-- Pure flight reconciler: `PhysicalProjectileFlightState.TryAdvance`
-- EFT remains the flight integrator; measured position and velocity advance immutable physical
-  state and energy-based capability before the next material interaction
-- The runtime seam is verified: `Shot.CreateFragments` finishes child construction before
-  `BallisticsCalculator.UpdateShots` schedules `Shot.Fragments`, so an outer postfix can validate,
-  rewrite, and reinitialize children before their first tick
-- `PhysicalShotBindingStore` implements that seam and rejects stale entries when EFT recycles a
-  pooled `Shot`; it matches the complete captured creation identity rather than trusting the object
-  reference alone
-- A collision transition replaces the host child list only after every physical state, projection,
-  replacement shot, trajectory, armor-CF application, and binding succeeds
-- Roots, retained primaries, projectile fragments, and target spall continue through the same
-  measured-flight and later-collision path
+## Physical simulation
 
-## Deformation and material response
+- Immutable SI state tracks mass, dimensions, area, drag, position, velocity, momentum, energy,
+  orientation, yaw/tumble, lineage, source material, collision history, terminal state, and render
+  state for intact, deformed, projectile-fragment, target-spall, and target-spall-fragment bodies.
+- A deterministic PCG stream and host-bounded child seed mapping drive deformation,
+  fragmentation, spall, directions, and child-shot construction.
+- Deformation accounts target resistance, plastic work, fracture, heat, residual energy,
+  expansion, cross-section, yaw, tumble, drag, and remaining physical capability.
+- Fragmentation partitions the immediate parent's reserved mass and energy. Target material
+  provenance remains independent from immediate-parent mass source, including later target-spall
+  fragmentation.
+- Conservation gates reject mass over-allocation, excess output energy, invalid lineage,
+  duplicated component identity, non-finite state, and inconsistent history.
+- Each surviving component projects its own mass, equivalent diameter, velocity, drag, damage,
+  and penetration into an EFT child shot. EFT remains the trajectory integrator and the authority
+  for penetration, armor, ricochet, deviation, and fragmentation outcomes.
+- Ten deterministic meshes cover spitzer, round-nose, flat-nose, mushroomed, flattened,
+  irregular-fragment, spall-flake, spall-chunk, spherical-shot, and flechette geometry.
+- Rendering uses shared meshes/materials, a generation-owned pool, bounded FIFO work, per-frame
+  command limits, nearest-first culling, embedded expiry, destroyed-slot recovery, and scene
+  cleanup.
 
-- Pure solver: `PhysicalDeformationSolver.TrySolve`
-- Projectile inputs: construction, density, plastic-work density, fracture energy per mass,
-  ductility, brittleness, deformation coupling, expansion limit, fragment-mass bounds,
-  shape penalty, drag multiplier, and yaw/tumble thresholds
-- Target inputs: material class, density, calibrated effective resistance pressure,
-  deformation/fracture coupling, and heat-loss fraction
-- Collision inputs: explicit physical thickness, effective material path, surface normal,
-  impact position, and the host-selected outcome and outgoing direction
-- Outputs: target work, deformation/fracture/heat/other losses, normal impact energy,
-  residual system energy and speed, expansion, projected area, shape, yaw/tumble, drag,
-  current physical capabilities, and an appended immutable collision record
-- A continuing component keeps its projectile identity, deterministic seed, nominal geometry,
-  original mass, lineage, generation, and complete prior collision history
-- A host-confirmed fragmentation reserves exact projectile mass and energy for fragment
-  construction; the deformation stage does not invent child count, shape, or trajectory
-- Stopped events account for all parent translational energy; impossible moving outcomes
-  fail open instead of overriding the host result
-- No host penetration, ricochet, deviation, fragmentation, or armor random decision is
-  evaluated again
-- Runtime mappings use conservative construction and material-class profiles derived from the
-  limited host fields. They remain engineering estimates, not manufacturer metallurgy or
-  certification data
-- Eligibility uses mechanical explosion data rather than EFT's large-impact effect marker.
-  Single-projectile ammunition with zero explosive strength, fragments, fuse time, and blast
-  distance is accepted; true explosive and multi-projectile ammunition remains excluded
-- An optional schema-1 reflection contract lets a collider supply one canonical physical material
-  class and an opaque surface identity without a project or assembly reference. Malformed metadata
-  fails open to vanilla instead of silently falling back to a different material. The default
-  catalog now includes a distinct titanium target/spall profile
-- Target density is carried for the later spall stage and is not claimed to affect the
-  present deformation calculation
-- Physical thickness is retained as measured geometry while effective path drives work;
-  no thickness effect is claimed without a supplied material path
+## Telemetry boundary
 
-## Physical component rendering
+Schema `2` publishes detached prepared and resolved collision snapshots through BCL-only
+subscription methods. Records include host identity, impact geometry, exact projectile design,
+complete parent/output state, material provenance, immediate-parent mass source, losses, residual
+and output energy, closure error, and optional opaque surface identity. No pooled shot, collider,
+Unity object, or mutable foreign collection is retained. With no subscriber, snapshot work is
+skipped.
 
-- Eight deterministic low-poly meshes represent spitzer, round-nose, flat-nose, expanded,
-  flattened, irregular projectile-fragment, spall-flake, and spall-chunk geometry
-- Mesh scale uses each component's calculated diameter and length; physical attitude and yaw are
-  carried through later measured flight instead of being reconstructed from a decal
-- Unity work is restricted to the main thread; collision hooks enqueue immutable render commands
-- A generation-owned fixed pool rejects stale owners, validates pooled-shot identity, recreates a
-  destroyed slot without clearing other active visuals, shrinks safely while idle, and cleans up
-  on scene transitions
-- A thread-safe 8,192-command FIFO retains a bounded newest window. Main-thread processing is
-  capped at 256 commands per frame by default, configurable from 32 through 1,024; unprocessed
-  commands remain in exact retained order and the reusable batch is cleared even after failure
-- Nearest-first culling, separate visible/tracked limits, embedded expiry, shared materials and
-  meshes, and disabled shadows/probes/motion vectors bound rendering cost
+## Offline verification
 
-## Physical transition telemetry
+- Release solution build: warnings as errors, checked arithmetic, recommended .NET analyzers,
+  code-style enforcement, deterministic build; `0` warnings and `0` errors.
+- Validation: `45` groups passed, `0` failed.
+- Installed database: `210` numeric templates, `208` positive-speed fireable templates, `1,872`
+  falloff calculations, and two expected abstract zero-speed fallbacks.
+- Deterministic deformation and fragmentation property sweeps: `4,096` cases each.
+- Renderer geometry, manifold/winding, ownership, culling, queue capacity, and deterministic stress
+  checks pass.
+- Physical state, projection, host-seed bounds, telemetry isolation, conservation, provenance,
+  fail-open, and cumulative-flight checks pass.
 
-- Public schema: `PhysicalProjectileTelemetry.SchemaVersion == 1`
-- `Subscribe(Action<object>)` and `Unsubscribe(Action<object>)` form a compile-time-independent
-  observation boundary; the payload is the typed immutable `PhysicalProjectileTelemetryEvent`
-- No host object, collider, shot, Unity object, or mutable output collection is retained
-- Prepared events are emitted only after collision state validation; resolved events are emitted
-  only after stopped-state registration or complete transactional child replacement
-- Records carry copied host identity, exact impact geometry, target profile, the complete immutable
-  parent and outputs, projectile-derived mass, fresh target-spall mass, all loss categories,
-  residual/output energy, closure error, and the optional opaque target-surface identity used by
-  external fixture harnesses to bind evidence to one exact layer
-- The runtime performs no telemetry snapshot work with zero subscribers, and one failing subscriber
-  cannot interrupt another subscriber or the physical transaction
+## Known alpha limitations
 
-## Verification
+- The physical path is experimental and remains disabled by default.
+- Construction and target-material properties are engineering approximations from the installed
+  database and public descriptions, not manufacturer drawings or certification data.
+- EFT remains responsible for flight integration and outcome decisions; this project does not
+  replace its full aerodynamic or armor model.
+- Payload templates are cataloged but intentionally not converted to kinetic projectiles.
+- Low-poly component geometry is a physical-state visualization, not a scanned projectile model.
+- Some installed multi-projectile source values are game abstractions and are preserved per EFT
+  child unless an explicit catalog fallback is required.
+- The `1.3.0` candidate still requires the final minimal startup/load smoke test and broader
+  community runtime testing for compatibility, balance, rendering, pooling, and performance.
 
-- Checked Release and Debug builds with all default analyzers enabled, warnings as errors, checked
-  arithmetic, deterministic continuous-integration settings: zero warnings, zero errors
-- Validation groups: 43 passed, zero failed, including ammunition identity and kinetic-eligibility
-  regressions, immutable telemetry and observer isolation,
-  deterministic render geometry, ownership, and FIFO workload budgeting, 4,096 deterministic deformation cases,
-  4,096 deterministic fragmentation cases, physical-to-EFT projection, measured-flight
-  reconciliation, fail-open rejection, and the complete installed-ammunition sweep
-- The maximum .NET analyzer set and formatting verification complete with zero warnings and zero
-  errors. Artifact hashes are recorded after each committed test build rather than embedded here
-  before the commit exists
-- Installed ammunition sweep: 210 templates, including 208 positive-speed templates over
-  nine fractions for 1,872 successful calculations and two expected abstract fallbacks
-- The effect-metadata sweep admits 10 single kinetic large-caliber templates and rejects all 10
-  mechanically explosive projectile templates in the installed database
+## Release boundary
 
-## Next development layer
-
-Finish the current integrated campaign against the committed correction build. Recheck M903 and
-one ordinary large-caliber effect-only round, confirm the corrected taxonomy name in physical
-telemetry, and continue the existing renderer, continuation, fragmentation, armor, corpse,
-durability, and performance observations. Additional development remains limited to defects
-reproduced by that campaign.
+No further feature category is required before the community alpha. Changes after publication are
+limited to defects reproduced by local or community testing, with crashes, corrupt state,
+classification errors, conservation failures, provenance failures, pooled-identity leaks, severe
+performance regressions, and broken installation or rollback taking priority.

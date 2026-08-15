@@ -22,7 +22,8 @@ namespace BallisticPenetration.Core.Physics
         GeometryInvalid = 12,
         OrientationInvalid = 13,
         CapabilityInvalid = 14,
-        StateCreationFailed = 15
+        StateCreationFailed = 15,
+        DesignInvalid = 16
     }
 
     public sealed class PhysicalRootProjectileInput
@@ -34,6 +35,8 @@ namespace BallisticPenetration.Core.Physics
         public ulong DeterministicSeed { get; set; }
 
         public PhysicalProjectileConstruction Construction { get; set; }
+
+        public PhysicalProjectileDesignClass DesignClass { get; set; }
 
         public PhysicalProjectileShapeClass ShapeClass { get; set; }
 
@@ -82,14 +85,25 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (input.Construction <= PhysicalProjectileConstruction.Unknown
-                || input.Construction >= PhysicalProjectileConstruction.TargetMaterial)
+                || input.Construction == PhysicalProjectileConstruction.TargetMaterial
+                || input.Construction > PhysicalProjectileConstruction.MonolithicLead)
             {
                 failureReason = PhysicalRootProjectileFailureReason.ConstructionInvalid;
                 return false;
             }
 
+            if (input.DesignClass <= PhysicalProjectileDesignClass.Unknown
+                || input.DesignClass == PhysicalProjectileDesignClass.Payload
+                || input.DesignClass > PhysicalProjectileDesignClass.Flechette)
+            {
+                failureReason = PhysicalRootProjectileFailureReason.DesignInvalid;
+                return false;
+            }
+
             if (input.ShapeClass <= PhysicalProjectileShapeClass.Unknown
-                || input.ShapeClass >= PhysicalProjectileShapeClass.TargetSpallFlake)
+                || input.ShapeClass == PhysicalProjectileShapeClass.TargetSpallFlake
+                || input.ShapeClass == PhysicalProjectileShapeClass.TargetSpallChunk
+                || input.ShapeClass > PhysicalProjectileShapeClass.Flechette)
             {
                 failureReason = PhysicalRootProjectileFailureReason.ShapeInvalid;
                 return false;
@@ -172,6 +186,7 @@ namespace BallisticPenetration.Core.Physics
                 FragmentGeneration = 0,
                 DeterministicSeed = input.DeterministicSeed,
                 Construction = input.Construction,
+                DesignClass = input.DesignClass,
                 ShapeClass = input.ShapeClass,
                 OriginalMassKilograms = input.MassKilograms,
                 RetainedMassKilograms = input.MassKilograms,

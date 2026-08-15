@@ -31,7 +31,12 @@ namespace BallisticPenetration.Core.Physics
         TargetCeramic = 8,
         TargetMineral = 9,
         TargetOrganic = 10,
-        TargetOther = 11
+        TargetOther = 11,
+        Aluminum = 12,
+        Brass = 13,
+        Zinc = 14,
+        NonMetallic = 15,
+        Lead = 16
     }
 
     /// <summary>
@@ -247,6 +252,32 @@ namespace BallisticPenetration.Core.Physics
                 case PhysicalProjectileShapeClass.TargetSpallChunk:
                     descriptor = BuildSpallChunk(shapeClass);
                     break;
+                case PhysicalProjectileShapeClass.SphericalShot:
+                    descriptor = BuildRevolved(
+                        shapeClass,
+                        radialSegments,
+                        new[]
+                        {
+                            new Ring(-0.5d, 0.025d),
+                            new Ring(-0.35d, 0.36d),
+                            new Ring(0d, 0.50d),
+                            new Ring(0.35d, 0.36d),
+                            new Ring(0.5d, 0.025d)
+                        });
+                    break;
+                case PhysicalProjectileShapeClass.Flechette:
+                    descriptor = BuildRevolved(
+                        shapeClass,
+                        radialSegments,
+                        new[]
+                        {
+                            new Ring(-0.5d, 0.50d),
+                            new Ring(-0.38d, 0.18d),
+                            new Ring(0.28d, 0.18d),
+                            new Ring(0.45d, 0.08d),
+                            new Ring(0.5d, 0.025d)
+                        });
+                    break;
                 default:
                     failureReason = PhysicalVisualGeometryFailureReason.ShapeUnsupported;
                     return false;
@@ -353,15 +384,29 @@ namespace BallisticPenetration.Core.Physics
                 case PhysicalProjectileConstruction.LeadCoreJacketed:
                     return PhysicalVisualMaterialKey.LeadAndCopper;
                 case PhysicalProjectileConstruction.SteelCoreJacketed:
+                case PhysicalProjectileConstruction.SteelPenetratorLeadCoreJacketed:
+                case PhysicalProjectileConstruction.SteelPenetratorCopperCoreJacketed:
+                case PhysicalProjectileConstruction.SteelPenetratorAluminumCoreJacketed:
                     return PhysicalVisualMaterialKey.SteelCore;
                 case PhysicalProjectileConstruction.TungstenCoreJacketed:
                     return PhysicalVisualMaterialKey.TungstenCore;
                 case PhysicalProjectileConstruction.MonolithicCopper:
+                case PhysicalProjectileConstruction.CopperAlloyCoreJacketed:
                     return PhysicalVisualMaterialKey.Copper;
                 case PhysicalProjectileConstruction.MonolithicSteel:
                     return PhysicalVisualMaterialKey.Steel;
                 case PhysicalProjectileConstruction.FrangibleComposite:
                     return PhysicalVisualMaterialKey.Frangible;
+                case PhysicalProjectileConstruction.AluminumCoreJacketed:
+                    return PhysicalVisualMaterialKey.Aluminum;
+                case PhysicalProjectileConstruction.MonolithicBrass:
+                    return PhysicalVisualMaterialKey.Brass;
+                case PhysicalProjectileConstruction.MonolithicZinc:
+                    return PhysicalVisualMaterialKey.Zinc;
+                case PhysicalProjectileConstruction.NonMetallicComposite:
+                    return PhysicalVisualMaterialKey.NonMetallic;
+                case PhysicalProjectileConstruction.MonolithicLead:
+                    return PhysicalVisualMaterialKey.Lead;
                 default:
                     return PhysicalVisualMaterialKey.Unknown;
             }

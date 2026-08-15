@@ -15,41 +15,85 @@ namespace BallisticPenetration.Runtime
         internal static bool TryResolveProjectile(
             Shot shot,
             out PhysicalProjectileMaterialProfile? projectileProfile,
+            out PhysicalProjectileDesignClass designClass,
             out PhysicalProjectileShapeClass shapeClass,
-            out double dragCoefficient)
+            out double dragCoefficient,
+            out double massKilograms,
+            out double diameterMetres)
         {
             projectileProfile = null;
+            designClass = PhysicalProjectileDesignClass.Unknown;
             shapeClass = PhysicalProjectileShapeClass.Unknown;
             dragCoefficient = double.NaN;
+            massKilograms = double.NaN;
+            diameterMetres = double.NaN;
             if (shot == null
-                || !(shot.Ammo?.Template is AmmoTemplate template)
-                || !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
-                    template.ProjectileCount,
-                    template.buckshotBullets,
-                    template.ExplosionStrength,
-                    template.FragmentsCount,
-                    template.FuzeArmTimeSec,
-                    template.MinExplosionDistance,
-                    template.MaxExplosionDistance))
+                || !(shot.Ammo?.Template is AmmoTemplate template))
             {
                 return false;
             }
 
-            PhysicalProjectileConstruction construction = ClassifyConstruction(template);
+            if (!PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    template.StringId,
+                    out PhysicalAmmunitionDesignDefinition definition)
+                || !definition.IsKineticProjectile)
+            {
+                return false;
+            }
+
             if (!PhysicalDefaultProfileCatalog.TryGetProjectileProfile(
-                    construction,
+                    definition.Construction,
                     out projectileProfile)
                 || projectileProfile == null)
             {
                 return false;
             }
 
-            shapeClass = ClassifyShape(template);
-            dragCoefficient = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(construction);
+            designClass = definition.DesignClass;
+            shapeClass = definition.InitialShapeClass;
+            dragCoefficient = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(
+                definition.Construction,
+                designClass,
+                shapeClass);
+            massKilograms = ConvertPositiveToSi(
+                template.BulletMassGram,
+                0.001d,
+                definition.FallbackMassKilograms);
+            diameterMetres = ConvertPositiveToSi(
+                template.BulletDiameterMilimeters,
+                0.001d,
+                definition.FallbackDiameterMetres);
             return shapeClass != PhysicalProjectileShapeClass.Unknown
+                && designClass != PhysicalProjectileDesignClass.Unknown
                 && !double.IsNaN(dragCoefficient)
                 && !double.IsInfinity(dragCoefficient)
-                && dragCoefficient > 0d;
+                && dragCoefficient > 0d
+                && !double.IsNaN(massKilograms)
+                && !double.IsInfinity(massKilograms)
+                && massKilograms > 0d
+                && !double.IsNaN(diameterMetres)
+                && !double.IsInfinity(diameterMetres)
+                && diameterMetres > 0d;
+        }
+
+        private static double ConvertPositiveToSi(
+            float sourceValue,
+            double scale,
+            double fallbackValue)
+        {
+            double converted = sourceValue * scale;
+            if (!double.IsNaN(converted)
+                && !double.IsInfinity(converted)
+                && converted > 0d)
+            {
+                return converted;
+            }
+
+            return !double.IsNaN(fallbackValue)
+                && !double.IsInfinity(fallbackValue)
+                && fallbackValue > 0d
+                    ? fallbackValue
+                    : double.NaN;
         }
 
         internal static bool TryResolveProjectileProfile(
@@ -113,41 +157,6 @@ namespace BallisticPenetration.Runtime
                     materialClass,
                     out fragmentationProfile)
                 && fragmentationProfile != null;
-        }
-
-        private static PhysicalProjectileConstruction ClassifyConstruction(AmmoTemplate template)
-        {
-            if (template.FragmentationChance >= 0.50f && template.PenetrationPower <= 20)
-            {
-                return PhysicalProjectileConstruction.FrangibleComposite;
-            }
-
-            if (template.PenetrationPower >= 60)
-            {
-                return PhysicalProjectileConstruction.TungstenCoreJacketed;
-            }
-
-            if (template.PenetrationPower >= 25 || template.ArmorDamage >= 35)
-            {
-                return PhysicalProjectileConstruction.SteelCoreJacketed;
-            }
-
-            return PhysicalProjectileConstruction.LeadCoreJacketed;
-        }
-
-        private static PhysicalProjectileShapeClass ClassifyShape(AmmoTemplate template)
-        {
-            if (template.PenetrationPower < 20 && template.Damage >= 80)
-            {
-                return PhysicalProjectileShapeClass.FlatNose;
-            }
-
-            if (template.PenetrationPower < 25)
-            {
-                return PhysicalProjectileShapeClass.RoundNose;
-            }
-
-            return PhysicalProjectileShapeClass.Spitzer;
         }
 
         private static PhysicalMaterialClass MapMaterial(MaterialType materialType)

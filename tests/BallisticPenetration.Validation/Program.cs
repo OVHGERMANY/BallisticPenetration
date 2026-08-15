@@ -17,6 +17,7 @@ namespace BallisticPenetration.Validation
         private const string SnbInternalName = "patron_762x54R_SNB";
         private const string UsInternalName = "patron_545x39_US";
         private const string SevenN40TemplateId = "61962b617c6c7b169525f168";
+        private const string SsaApTemplateId = "601949593ae8f707c4608daa";
         private const string M903TemplateId = "67dc2648ba5b79876906a166";
         private const string Vog25TemplateId = "5656eb674bdc2d35148b457c";
         private const double Tolerance = 0.000000000001d;
@@ -35,6 +36,25 @@ namespace BallisticPenetration.Validation
         };
 
         private static readonly bool[] NoArmorMatches = { false, false, false };
+
+        private static readonly PhysicalProjectileConstruction[] SupportedProjectileConstructions =
+        {
+            PhysicalProjectileConstruction.LeadCoreJacketed,
+            PhysicalProjectileConstruction.SteelCoreJacketed,
+            PhysicalProjectileConstruction.TungstenCoreJacketed,
+            PhysicalProjectileConstruction.MonolithicCopper,
+            PhysicalProjectileConstruction.MonolithicSteel,
+            PhysicalProjectileConstruction.FrangibleComposite,
+            PhysicalProjectileConstruction.AluminumCoreJacketed,
+            PhysicalProjectileConstruction.CopperAlloyCoreJacketed,
+            PhysicalProjectileConstruction.SteelPenetratorLeadCoreJacketed,
+            PhysicalProjectileConstruction.SteelPenetratorCopperCoreJacketed,
+            PhysicalProjectileConstruction.SteelPenetratorAluminumCoreJacketed,
+            PhysicalProjectileConstruction.MonolithicBrass,
+            PhysicalProjectileConstruction.MonolithicZinc,
+            PhysicalProjectileConstruction.NonMetallicComposite,
+            PhysicalProjectileConstruction.MonolithicLead
+        };
 
         private static int _passed;
         private static int _failed;
@@ -83,9 +103,11 @@ namespace BallisticPenetration.Validation
             Run("Physical transition identities use exact component state", ValidatePhysicalTransitionIdentity);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
+            Run("Physical child seeds stay inside the host random table", ValidatePhysicalHostRandomSeed);
             Run("Physical material profile validation", ValidatePhysicalMaterialProfiles);
             Run("Reflection-only physical surface material contract", ValidatePhysicalSurfaceMaterialContract);
             Run("Built-in physical profile catalog", ValidatePhysicalDefaultProfileCatalog);
+            Run("Projectile design controls deformation, fracture, and drag", ValidatePhysicalProjectileDesignResponse);
             Run("Conserved deformation and material response", ValidatePhysicalDeformationResponse);
             Run("Deformation solver fail-open behavior", ValidatePhysicalDeformationFallback);
             Run("Deformation solver deterministic property sweep", ValidatePhysicalDeformationStressSweep);
@@ -234,8 +256,18 @@ namespace BallisticPenetration.Validation
                 "big_round_impact",
                 m903Properties.GetProperty("ExplosionType").GetString() ?? string.Empty);
             AssertTrue(
-                "installed M903 is an eligible single kinetic projectile",
-                IsEligibleInstalledProjectile(m903Properties));
+                "installed M903 design resolves",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    M903TemplateId,
+                    out PhysicalAmmunitionDesignDefinition m903Definition));
+            AssertEqual(
+                "installed M903 construction",
+                PhysicalProjectileConstruction.TungstenCoreJacketed,
+                m903Definition.Construction);
+            AssertEqual(
+                "installed M903 design",
+                PhysicalProjectileDesignClass.SabotedPenetrator,
+                m903Definition.DesignClass);
             AssertNear(
                 "installed M903 penetration power",
                 115d,
@@ -261,14 +293,17 @@ namespace BallisticPenetration.Validation
                 ProjectileId = "installed-m903-root",
                 RootShotId = "installed-m903-shot",
                 DeterministicSeed = 0x4D393033UL,
-                Construction = PhysicalProjectileConstruction.TungstenCoreJacketed,
-                ShapeClass = PhysicalProjectileShapeClass.Spitzer,
+                Construction = m903Definition.Construction,
+                DesignClass = m903Definition.DesignClass,
+                ShapeClass = m903Definition.InitialShapeClass,
                 MassKilograms = m903MassKilograms,
                 NominalDiameterMetres = m903DiameterMetres,
                 MaterialDensityKilogramsPerCubicMetre =
                     m903ProfileValue.DensityKilogramsPerCubicMetre,
                 DragCoefficient = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(
-                    PhysicalProjectileConstruction.TungstenCoreJacketed),
+                    m903Definition.Construction,
+                    m903Definition.DesignClass,
+                    m903Definition.InitialShapeClass),
                 PositionMetres = PhysicalVector3.Zero,
                 VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, m903Speed)
             };
@@ -292,100 +327,170 @@ namespace BallisticPenetration.Validation
                 0.5d * m903MassKilograms * m903Speed * m903Speed,
                 m903StateValue.TranslationalKineticEnergyJoules);
 
-            JsonElement vog25Properties = document.RootElement
-                .GetProperty(Vog25TemplateId)
-                .GetProperty("_props");
             AssertTrue(
-                "installed VOG-25 remains excluded",
-                !IsEligibleInstalledProjectile(vog25Properties));
+                "SSA AP design resolves",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    SsaApTemplateId,
+                    out PhysicalAmmunitionDesignDefinition ssaApDefinition));
+            AssertEqual(
+                "SSA AP tungsten-carbide construction",
+                PhysicalProjectileConstruction.TungstenCoreJacketed,
+                ssaApDefinition.Construction);
+            AssertEqual(
+                "SSA AP sabot design",
+                PhysicalProjectileDesignClass.SabotedPenetrator,
+                ssaApDefinition.DesignClass);
+            AssertEqual(
+                "SSA AP initial shape",
+                PhysicalProjectileShapeClass.Spitzer,
+                ssaApDefinition.InitialShapeClass);
+            AssertTrue(
+                "catalog definition value equality",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    SsaApTemplateId,
+                    out PhysicalAmmunitionDesignDefinition repeatedSsaApDefinition)
+                && ssaApDefinition == repeatedSsaApDefinition
+                && ssaApDefinition.Equals((object)repeatedSsaApDefinition)
+                && ssaApDefinition.GetHashCode() == repeatedSsaApDefinition.GetHashCode());
+            AssertTrue(
+                "catalog definition value inequality",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    Vog25TemplateId,
+                    out PhysicalAmmunitionDesignDefinition unequalDefinition)
+                && ssaApDefinition != unequalDefinition
+                && !ssaApDefinition.Equals(unequalDefinition));
 
-            int effectMetadataProjectiles = 0;
-            int effectOnlyProjectilesAccepted = 0;
-            int mechanicalExplosivesRejected = 0;
+            int fireableTemplateCount = 0;
+            int kineticTemplateCount = 0;
+            int payloadTemplateCount = 0;
             foreach (JsonProperty itemProperty in document.RootElement.EnumerateObject())
             {
-                JsonElement item = itemProperty.Value;
-                if (!item.TryGetProperty("_props", out JsonElement properties)
-                    || !properties.TryGetProperty("ProjectileCount", out _))
+                if (!itemProperty.Value.TryGetProperty("_props", out JsonElement properties)
+                    || !properties.TryGetProperty("InitialSpeed", out JsonElement speedElement)
+                    || speedElement.GetDouble() <= 0d)
                 {
                     continue;
                 }
 
-                bool hasGrenaderComponent = properties.TryGetProperty(
-                        "HasGrenaderComponent",
-                        out JsonElement grenaderElement)
-                    && grenaderElement.ValueKind == JsonValueKind.True;
-                string explosionType = properties.TryGetProperty(
-                        "ExplosionType",
-                        out JsonElement explosionTypeElement)
-                    && explosionTypeElement.ValueKind == JsonValueKind.String
-                        ? explosionTypeElement.GetString() ?? string.Empty
-                        : string.Empty;
-                if (!hasGrenaderComponent && string.IsNullOrEmpty(explosionType))
+                fireableTemplateCount++;
+                AssertTrue(
+                    "fireable ammunition design resolves: " + itemProperty.Name,
+                    PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                        itemProperty.Name,
+                        out PhysicalAmmunitionDesignDefinition definition));
+                AssertEqual(
+                    "catalog preserves template identity: " + itemProperty.Name,
+                    itemProperty.Name,
+                    definition.TemplateId);
+                AssertTrue(
+                    "catalog construction is explicit: " + itemProperty.Name,
+                    definition.Construction > PhysicalProjectileConstruction.Unknown
+                    && definition.Construction != PhysicalProjectileConstruction.TargetMaterial
+                    && definition.Construction <= PhysicalProjectileConstruction.MonolithicLead);
+                AssertTrue(
+                    "catalog design is explicit: " + itemProperty.Name,
+                    definition.DesignClass > PhysicalProjectileDesignClass.Unknown
+                    && definition.DesignClass <= PhysicalProjectileDesignClass.Flechette);
+                AssertTrue(
+                    "catalog shape is explicit: " + itemProperty.Name,
+                    definition.InitialShapeClass > PhysicalProjectileShapeClass.Unknown
+                    && definition.InitialShapeClass <= PhysicalProjectileShapeClass.Flechette);
+                if (definition.IsKineticProjectile)
                 {
-                    continue;
-                }
-
-                effectMetadataProjectiles++;
-                bool eligible = IsEligibleInstalledProjectile(properties);
-                bool hasMechanicalExplosion =
-                    properties.GetProperty("ExplosionStrength").GetDouble() > 0d
-                    || properties.GetProperty("FragmentsCount").GetInt32() > 0
-                    || properties.GetProperty("FuzeArmTimeSec").GetDouble() > 0d
-                    || properties.GetProperty("MinExplosionDistance").GetDouble() > 0d
-                    || properties.GetProperty("MaxExplosionDistance").GetDouble() > 0d;
-                if (hasMechanicalExplosion)
-                {
+                    kineticTemplateCount++;
                     AssertTrue(
-                        "mechanical explosive rejected: " + itemProperty.Name,
-                        !eligible);
-                    mechanicalExplosivesRejected++;
+                        "kinetic catalog profile resolves: " + itemProperty.Name,
+                        PhysicalDefaultProfileCatalog.TryGetProjectileProfile(
+                            definition.Construction,
+                            out PhysicalProjectileMaterialProfile? catalogProfile)
+                        && catalogProfile != null);
+                    double sourceMassKilograms = properties
+                        .GetProperty("BulletMassGram")
+                        .GetDouble() * 0.001d;
+                    double sourceDiameterMetres = properties
+                        .GetProperty("BulletDiameterMilimeters")
+                        .GetDouble() * 0.001d;
+                    AssertTrue(
+                        "kinetic physical dimensions resolve: " + itemProperty.Name,
+                        (IsFinite(sourceMassKilograms)
+                            && sourceMassKilograms > 0d
+                            && IsFinite(sourceDiameterMetres)
+                            && sourceDiameterMetres > 0d)
+                        || definition.HasFallbackPhysicalDimensions);
+                    double catalogDrag = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(
+                        definition.Construction,
+                        definition.DesignClass,
+                        definition.InitialShapeClass);
+                    AssertTrue(
+                        "kinetic catalog drag resolves: " + itemProperty.Name,
+                        IsFinite(catalogDrag) && catalogDrag > 0d);
                 }
                 else
                 {
-                    AssertTrue(
-                        "effect-only kinetic projectile accepted: " + itemProperty.Name,
-                        eligible);
-                    effectOnlyProjectilesAccepted++;
+                    payloadTemplateCount++;
                 }
             }
 
-            AssertEqual("effect-metadata projectile count", 20, effectMetadataProjectiles);
-            AssertEqual("effect-only kinetic projectile count", 10, effectOnlyProjectilesAccepted);
-            AssertEqual("mechanical explosive projectile count", 10, mechanicalExplosivesRejected);
+            AssertEqual("fireable ammunition catalog coverage", 208, fireableTemplateCount);
+            AssertEqual(
+                "catalog definition count",
+                fireableTemplateCount,
+                PhysicalAmmunitionDesignCatalog.Count);
+            AssertEqual("kinetic projectile count", 185, kineticTemplateCount);
+            AssertEqual("non-kinetic payload count", 23, payloadTemplateCount);
+            AssertTrue(
+                "unknown ammunition does not receive a guessed construction",
+                !PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    "not-an-installed-ammunition-template",
+                    out _));
 
             AssertTrue(
-                "non-finite explosion metadata is rejected",
-                !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
-                    1,
-                    0,
-                    double.NaN,
-                    0,
-                    0d,
-                    0d,
-                    0d));
+                "installed VOG-25 resolves as a payload",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    Vog25TemplateId,
+                    out PhysicalAmmunitionDesignDefinition vog25Definition)
+                && !vog25Definition.IsKineticProjectile
+                && vog25Definition.DesignClass == PhysicalProjectileDesignClass.Payload);
             AssertTrue(
-                "multiple projectiles remain excluded",
-                !PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
-                    2,
-                    0,
-                    0d,
-                    0,
-                    0d,
-                    0d,
-                    0d));
-        }
-
-        private static bool IsEligibleInstalledProjectile(JsonElement properties)
-        {
-            return PhysicalAmmunitionPolicy.IsEligibleSingleKineticProjectile(
-                properties.GetProperty("ProjectileCount").GetInt32(),
-                properties.GetProperty("buckshotBullets").GetInt32(),
-                properties.GetProperty("ExplosionStrength").GetDouble(),
-                properties.GetProperty("FragmentsCount").GetInt32(),
-                properties.GetProperty("FuzeArmTimeSec").GetDouble(),
-                properties.GetProperty("MinExplosionDistance").GetDouble(),
-                properties.GetProperty("MaxExplosionDistance").GetDouble());
+                "M576 effect metadata does not hide its physical buckshot",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    "5ede475339ee016e8c534742",
+                    out PhysicalAmmunitionDesignDefinition m576Definition)
+                && m576Definition.IsKineticProjectile
+                && m576Definition.Construction == PhysicalProjectileConstruction.MonolithicLead
+                && m576Definition.DesignClass == PhysicalProjectileDesignClass.Shot
+                && m576Definition.InitialShapeClass == PhysicalProjectileShapeClass.SphericalShot);
+            AssertTrue(
+                "Wave-R supplies catalog physical dimensions for missing source values",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    "5f647fd3f6e4ab66c82faed6",
+                    out PhysicalAmmunitionDesignDefinition waveRDefinition)
+                && waveRDefinition.IsKineticProjectile
+                && waveRDefinition.HasFallbackPhysicalDimensions
+                && Math.Abs(waveRDefinition.FallbackMassKilograms - 0.010d) <= Tolerance
+                && Math.Abs(waveRDefinition.FallbackDiameterMetres - 0.023d) <= Tolerance);
+            foreach (string copperFrangibleId in new[]
+            {
+                "5c0d56a986f774449d5de529",
+                "5cc86832d7f00c000d3a6e6c",
+                "5ea2a8e200685063ec28c05a"
+            })
+            {
+                AssertTrue(
+                    "machined-copper frangible construction: " + copperFrangibleId,
+                    PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                        copperFrangibleId,
+                        out PhysicalAmmunitionDesignDefinition copperFrangible)
+                    && copperFrangible.Construction
+                        == PhysicalProjectileConstruction.MonolithicCopper
+                    && copperFrangible.DesignClass == PhysicalProjectileDesignClass.Frangible);
+            }
+            AssertTrue(
+                "7.62x39 SP uses the soft-point response",
+                PhysicalAmmunitionDesignCatalog.TryGetDefinition(
+                    "64b7af734b75259c590fa895",
+                    out PhysicalAmmunitionDesignDefinition sevenSixTwoSp)
+                && sevenSixTwoSp.DesignClass == PhysicalProjectileDesignClass.SoftPoint);
         }
 
         private static void ValidatePostmortemArmorHitGuards()
@@ -627,7 +732,11 @@ namespace BallisticPenetration.Validation
                 PhysicalProjectileState.TryCreate(input, out state, out reason));
             PhysicalProjectileState validState = RequireValue("valid physical projectile", state);
             AssertEqual("valid physical projectile reason", PhysicalProjectileStateFailureReason.None, reason);
-            AssertEqual("physical state schema", 1, PhysicalProjectileState.SchemaVersion);
+            AssertEqual("physical state schema", 2, PhysicalProjectileState.SchemaVersion);
+            AssertEqual(
+                "physical projectile design retained",
+                PhysicalProjectileDesignClass.FullMetalJacket,
+                validState.DesignClass);
             AssertNear("physical projectile speed", 800d, validState.SpeedMetresPerSecond);
             AssertNear("physical projectile momentum x", 0d, validState.MomentumKilogramMetresPerSecond.X);
             AssertNear("physical projectile momentum z", 7.6d, validState.MomentumKilogramMetresPerSecond.Z);
@@ -657,6 +766,13 @@ namespace BallisticPenetration.Validation
         private static void ValidatePhysicalProjectileInvalidFallback()
         {
             PhysicalProjectileStateInput input = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            input.DesignClass = PhysicalProjectileDesignClass.Unknown;
+            AssertPhysicalStateFailure(
+                "unknown projectile design",
+                input,
+                PhysicalProjectileStateFailureReason.DesignClassInvalid);
+
+            input = CreateValidRootInput(800d, 0.01d, 0.0095d);
             input.OriginalMassKilograms = double.NaN;
             AssertPhysicalStateFailure(
                 "nonfinite original mass",
@@ -811,7 +927,7 @@ namespace BallisticPenetration.Validation
         private static void ValidatePhysicalVisualGeometry()
         {
             for (PhysicalProjectileShapeClass shape = PhysicalProjectileShapeClass.Spitzer;
-                 shape <= PhysicalProjectileShapeClass.TargetSpallChunk;
+                 shape <= PhysicalProjectileShapeClass.Flechette;
                  shape++)
             {
                 AssertTrue(
@@ -878,6 +994,7 @@ namespace BallisticPenetration.Validation
                     1d,
                     Math.Sqrt(maximumTransverseDistanceSquared));
 
+                double signedVolume = 0d;
                 for (int index = 0; index < mesh.Triangles.Count; index += 3)
                 {
                     int a = mesh.Triangles[index];
@@ -901,10 +1018,18 @@ namespace BallisticPenetration.Validation
                         .Add(mesh.Vertices[b])
                         .Add(mesh.Vertices[c])
                         .Scale(1d / 3d);
-                    AssertTrue(
-                        "unit render triangle faces outward " + shape + " " + index,
-                        normal.Dot(centroid) > 0d);
+                    if (shape != PhysicalProjectileShapeClass.Flechette)
+                    {
+                        AssertTrue(
+                            "unit render triangle faces outward " + shape + " " + index,
+                            normal.Dot(centroid) > 0d);
+                    }
+                    signedVolume += mesh.Vertices[a].Dot(
+                        mesh.Vertices[b].Cross(mesh.Vertices[c])) / 6d;
                 }
+                AssertTrue(
+                    "unit render mesh has consistent outward volume " + shape,
+                    signedVolume > 0d);
 
                 var edgeCounts = new Dictionary<(int Minimum, int Maximum), int>();
                 var edgeDirections = new Dictionary<(int Minimum, int Maximum), int>();
@@ -1553,7 +1678,7 @@ namespace BallisticPenetration.Validation
 
         private static void ValidatePhysicalTelemetry()
         {
-            AssertEqual("physical telemetry schema", 1, PhysicalProjectileTelemetry.SchemaVersion);
+            AssertEqual("physical telemetry schema", 2, PhysicalProjectileTelemetry.SchemaVersion);
             AssertTrue("physical telemetry begins without subscribers", !PhysicalProjectileTelemetry.HasSubscribers);
 
             PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
@@ -1794,6 +1919,37 @@ namespace BallisticPenetration.Validation
                 differentSeed.NextUInt32() != referenceSeed.NextUInt32());
         }
 
+        private static void ValidatePhysicalHostRandomSeed()
+        {
+            const int hostRandomCount = 512;
+            AssertEqual("host seed zero", 0, PhysicalHostRandomSeed.Map(0UL, hostRandomCount));
+            AssertEqual("host seed upper bound", 511, PhysicalHostRandomSeed.Map(511UL, hostRandomCount));
+            AssertEqual("host seed wraps at capacity", 0, PhysicalHostRandomSeed.Map(512UL, hostRandomCount));
+            AssertEqual(
+                "maximum component seed remains bounded",
+                511,
+                PhysicalHostRandomSeed.Map(ulong.MaxValue, hostRandomCount));
+
+            ulong componentSeed = 0xF1E2D3C4B5A69788UL;
+            int first = PhysicalHostRandomSeed.Map(componentSeed, hostRandomCount);
+            int second = PhysicalHostRandomSeed.Map(componentSeed, hostRandomCount);
+            AssertEqual("host seed mapping remains deterministic", first, second);
+            AssertTrue("host seed lower bound", first >= 0);
+            AssertTrue("host seed strict upper bound", first < hostRandomCount);
+
+            bool rejectedZeroCapacity = false;
+            try
+            {
+                _ = PhysicalHostRandomSeed.Map(componentSeed, 0);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                rejectedZeroCapacity = true;
+            }
+
+            AssertTrue("zero host random capacity rejected", rejectedZeroCapacity);
+        }
+
         private static void ValidatePhysicalMaterialProfiles()
         {
             PhysicalProjectileMaterialProfile? projectileProfile;
@@ -1872,6 +2028,87 @@ namespace BallisticPenetration.Validation
                 reason);
         }
 
+        private static void ValidatePhysicalProjectileDesignResponse()
+        {
+            AssertTrue(
+                "hollow point expansion response exceeds full metal jacket",
+                PhysicalProjectileDesignResponse.GetExpansionResponse(
+                    PhysicalProjectileDesignClass.HollowPoint)
+                > PhysicalProjectileDesignResponse.GetExpansionResponse(
+                    PhysicalProjectileDesignClass.FullMetalJacket));
+            AssertTrue(
+                "full metal jacket expansion response exceeds sabot penetrator",
+                PhysicalProjectileDesignResponse.GetExpansionResponse(
+                    PhysicalProjectileDesignClass.FullMetalJacket)
+                > PhysicalProjectileDesignResponse.GetExpansionResponse(
+                    PhysicalProjectileDesignClass.SabotedPenetrator));
+            AssertTrue(
+                "frangible fracture response exceeds full metal jacket",
+                PhysicalProjectileDesignResponse.GetFractureResponse(
+                    PhysicalProjectileDesignClass.Frangible)
+                > PhysicalProjectileDesignResponse.GetFractureResponse(
+                    PhysicalProjectileDesignClass.FullMetalJacket));
+            AssertTrue(
+                "fragment drag response exceeds polymer tip",
+                PhysicalProjectileDesignResponse.GetInitialDragMultiplier(
+                    PhysicalProjectileDesignClass.Fragment)
+                > PhysicalProjectileDesignResponse.GetInitialDragMultiplier(
+                    PhysicalProjectileDesignClass.PolymerTipped));
+            AssertTrue(
+                "payload design has no kinetic expansion response",
+                double.IsNaN(
+                    PhysicalProjectileDesignResponse.GetExpansionResponse(
+                        PhysicalProjectileDesignClass.Payload)));
+
+            PhysicalProjectileStateInput hollowPointInput =
+                CreateValidRootInput(1000d, 0.01d, 0.01d);
+            hollowPointInput.DesignClass = PhysicalProjectileDesignClass.HollowPoint;
+            PhysicalProjectileStateInput fullMetalJacketInput =
+                CreateValidRootInput(1000d, 0.01d, 0.01d);
+            fullMetalJacketInput.DesignClass = PhysicalProjectileDesignClass.FullMetalJacket;
+            PhysicalProjectileStateInput sabotInput =
+                CreateValidRootInput(1000d, 0.01d, 0.01d);
+            sabotInput.DesignClass = PhysicalProjectileDesignClass.SabotedPenetrator;
+
+            PhysicalDeformationResponse hollowPoint = SolveDeformationOrThrow(
+                CreateValidDeformationInput(
+                    CreatePhysicalStateOrThrow(hollowPointInput),
+                    PhysicalCollisionOutcome.Penetrated,
+                    0.01d,
+                    0.01d,
+                    50000000d,
+                    0.5d,
+                    "collision-design-hollow-point",
+                    "root-projectile"));
+            PhysicalDeformationResponse fullMetalJacket = SolveDeformationOrThrow(
+                CreateValidDeformationInput(
+                    CreatePhysicalStateOrThrow(fullMetalJacketInput),
+                    PhysicalCollisionOutcome.Penetrated,
+                    0.01d,
+                    0.01d,
+                    50000000d,
+                    0.5d,
+                    "collision-design-full-metal-jacket",
+                    "root-projectile"));
+            PhysicalDeformationResponse sabot = SolveDeformationOrThrow(
+                CreateValidDeformationInput(
+                    CreatePhysicalStateOrThrow(sabotInput),
+                    PhysicalCollisionOutcome.Penetrated,
+                    0.01d,
+                    0.01d,
+                    50000000d,
+                    0.5d,
+                    "collision-design-sabot",
+                    "root-projectile"));
+
+            AssertTrue(
+                "identical material and impact expand hollow point more than full metal jacket",
+                hollowPoint.DiameterExpansionRatio > fullMetalJacket.DiameterExpansionRatio);
+            AssertTrue(
+                "identical material and impact expand full metal jacket more than sabot penetrator",
+                fullMetalJacket.DiameterExpansionRatio > sabot.DiameterExpansionRatio);
+        }
+
         private static void ValidatePhysicalDeformationResponse()
         {
             PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
@@ -1904,7 +2141,7 @@ namespace BallisticPenetration.Validation
             AssertNear("normal allocated target work", expectedTargetWork, response.AllocatedTargetWorkJoules);
             AssertNear("normal deformation capacity", 125d, response.DeformationCapacityJoules);
             AssertNear("normal deformation severity", 1d, response.DeformationSeverity);
-            AssertNear("normal diameter expansion", 1.4d, response.DiameterExpansionRatio);
+            AssertNear("normal diameter expansion", 1.22d, response.DiameterExpansionRatio);
             AssertNear("normal heat loss", expectedTargetWork * 0.2d, response.LossBudget.HeatLossJoules);
             AssertNear("normal penetration loss", expectedTargetWork * 0.8d, response.LossBudget.PenetrationLossJoules);
             AssertNear("normal deformation loss", expectedDeformationWork, response.LossBudget.DeformationLossJoules);
@@ -2293,8 +2530,15 @@ namespace BallisticPenetration.Validation
                 stoppedInput.ImpactPositionMetres,
                 stopped.OutputPositionMetres);
             AssertEqual(
-                "stopped primary remains at impact face",
-                stoppedInput.ImpactPositionMetres,
+                "stopped primary center is embedded inside the target",
+                stoppedInput.ImpactPositionMetres.Add(
+                    RequireNormalized(
+                        "stopped incoming direction",
+                        parent.VelocityMetresPerSecond)
+                        .Scale(
+                            Math.Min(
+                                stoppedPrimaryState.LengthMetres * 0.5d,
+                                stoppedInput.EffectivePathLengthMetres))),
                 stoppedPrimaryState.PositionMetres);
 
             PhysicalDeformationInput ricochetInput = CreateValidDeformationInput(
@@ -2385,6 +2629,72 @@ namespace BallisticPenetration.Validation
                 "unclosed fragmented energy reason",
                 PhysicalConservationFailureReason.ResponseEnergyNotClosed,
                 conservationReason);
+
+            AssertTrue(
+                "tungsten penetrator profile available",
+                PhysicalDefaultProfileCatalog.TryGetProjectileProfile(
+                    PhysicalProjectileConstruction.TungstenCoreJacketed,
+                    out PhysicalProjectileMaterialProfile? tungstenProfileValue)
+                && tungstenProfileValue != null);
+            PhysicalProjectileMaterialProfile tungstenProfile = RequireValue(
+                "tungsten penetrator profile",
+                tungstenProfileValue);
+            var tungstenRootInput = new PhysicalRootProjectileInput
+            {
+                ProjectileId = "ssa-ap-root",
+                RootShotId = "ssa-ap-shot",
+                DeterministicSeed = 0x5353414150UL,
+                Construction = PhysicalProjectileConstruction.TungstenCoreJacketed,
+                DesignClass = PhysicalProjectileDesignClass.SabotedPenetrator,
+                ShapeClass = PhysicalProjectileShapeClass.Spitzer,
+                MassKilograms = 0.00337d,
+                NominalDiameterMetres = 0.0057d,
+                MaterialDensityKilogramsPerCubicMetre =
+                    tungstenProfile.DensityKilogramsPerCubicMetre,
+                DragCoefficient = PhysicalDefaultProfileCatalog.GetNominalDragCoefficient(
+                    PhysicalProjectileConstruction.TungstenCoreJacketed,
+                    PhysicalProjectileDesignClass.SabotedPenetrator,
+                    PhysicalProjectileShapeClass.Spitzer),
+                PositionMetres = PhysicalVector3.Zero,
+                VelocityMetresPerSecond = new PhysicalVector3(0d, 0d, 1013d)
+            };
+            AssertTrue(
+                "SSA AP tungsten root created",
+                PhysicalRootProjectileFactory.TryCreate(
+                    tungstenRootInput,
+                    out PhysicalProjectileState? tungstenRoot,
+                    out PhysicalRootProjectileFailureReason tungstenRootReason));
+            AssertEqual(
+                "SSA AP tungsten root reason",
+                PhysicalRootProjectileFailureReason.None,
+                tungstenRootReason);
+            PhysicalProjectileState tungstenParent = RequireValue(
+                "SSA AP tungsten root",
+                tungstenRoot);
+            PhysicalDeformationInput tungstenInput = CreateValidDeformationInput(
+                tungstenParent,
+                PhysicalCollisionOutcome.Penetrated,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                "collision-ssa-ap-penetrator",
+                tungstenParent.ProjectileId);
+            tungstenInput.ProjectileProfile = tungstenProfile;
+            PhysicalDeformationResponse tungstenResponse = SolveDeformationOrThrow(tungstenInput);
+            PhysicalProjectileState tungstenPrimary = RequireValue(
+                "SSA AP tungsten primary",
+                tungstenResponse.PrimaryState);
+            AssertTrue(
+                "hard penetrator deformation severity is exercised",
+                tungstenResponse.DeformationSeverity > 0.1d);
+            AssertTrue(
+                "hard penetrator diameter remains below mushroom threshold",
+                tungstenResponse.DiameterExpansionRatio <= 1.02d);
+            AssertEqual(
+                "hard penetrator does not become a mushroom from severity alone",
+                PhysicalProjectileShapeClass.Spitzer,
+                tungstenPrimary.ShapeClass);
         }
 
         private static void ValidatePhysicalDeformationFallback()
@@ -3396,9 +3706,7 @@ namespace BallisticPenetration.Validation
 
         private static void ValidatePhysicalDefaultProfileCatalog()
         {
-            for (PhysicalProjectileConstruction construction = PhysicalProjectileConstruction.LeadCoreJacketed;
-                construction < PhysicalProjectileConstruction.TargetMaterial;
-                construction++)
+            foreach (PhysicalProjectileConstruction construction in SupportedProjectileConstructions)
             {
                 PhysicalProjectileMaterialProfile? projectileProfile;
                 AssertTrue(
@@ -3574,6 +3882,7 @@ namespace BallisticPenetration.Validation
                 RootShotId = "root-shot",
                 DeterministicSeed = 0xAABBCCDDEEFF0011UL,
                 Construction = PhysicalProjectileConstruction.SteelCoreJacketed,
+                DesignClass = PhysicalProjectileDesignClass.FullMetalJacket,
                 ShapeClass = PhysicalProjectileShapeClass.Spitzer,
                 MassKilograms = MassKilograms,
                 NominalDiameterMetres = DiameterMetres,
@@ -4454,6 +4763,7 @@ namespace BallisticPenetration.Validation
             AssertEqual(name + " generation", expected.FragmentGeneration, actual.FragmentGeneration);
             AssertEqual(name + " seed", expected.DeterministicSeed, actual.DeterministicSeed);
             AssertEqual(name + " construction", expected.Construction, actual.Construction);
+            AssertEqual(name + " design", expected.DesignClass, actual.DesignClass);
             AssertEqual(name + " shape", expected.ShapeClass, actual.ShapeClass);
             AssertNear(name + " original mass", expected.OriginalMassKilograms, actual.OriginalMassKilograms);
             AssertNear(name + " retained mass", expected.RetainedMassKilograms, actual.RetainedMassKilograms);
@@ -4645,6 +4955,7 @@ namespace BallisticPenetration.Validation
                 FragmentGeneration = state.FragmentGeneration,
                 DeterministicSeed = state.DeterministicSeed,
                 Construction = state.Construction,
+                DesignClass = state.DesignClass,
                 ShapeClass = state.ShapeClass,
                 OriginalMassKilograms = state.OriginalMassKilograms,
                 RetainedMassKilograms = state.RetainedMassKilograms,
@@ -4692,6 +5003,7 @@ namespace BallisticPenetration.Validation
                 FragmentGeneration = 0,
                 DeterministicSeed = 0xC0FFEEUL,
                 Construction = PhysicalProjectileConstruction.SteelCoreJacketed,
+                DesignClass = PhysicalProjectileDesignClass.FullMetalJacket,
                 ShapeClass = PhysicalProjectileShapeClass.Spitzer,
                 OriginalMassKilograms = originalMassKilograms,
                 RetainedMassKilograms = retainedMassKilograms,
@@ -4758,6 +5070,9 @@ namespace BallisticPenetration.Validation
                 Construction = isSpall
                     ? PhysicalProjectileConstruction.TargetMaterial
                     : parent.Construction,
+                DesignClass = isSpall || kind == PhysicalProjectileKind.ProjectileFragment
+                    ? PhysicalProjectileDesignClass.Fragment
+                    : parent.DesignClass,
                 ShapeClass = isSpall
                     ? PhysicalProjectileShapeClass.TargetSpallFlake
                     : kind == PhysicalProjectileKind.DeformedProjectile

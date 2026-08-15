@@ -246,7 +246,7 @@ namespace BallisticPenetration.Core.Physics
     /// </summary>
     public static class PhysicalProjectileTelemetry
     {
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
 
         private static Action<object>? _transitionPublished;
 

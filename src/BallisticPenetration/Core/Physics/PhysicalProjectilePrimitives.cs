@@ -25,7 +25,9 @@ namespace BallisticPenetration.Core.Physics
         FlattenedDisc = 5,
         IrregularProjectileFragment = 6,
         TargetSpallFlake = 7,
-        TargetSpallChunk = 8
+        TargetSpallChunk = 8,
+        SphericalShot = 9,
+        Flechette = 10
     }
 
     public enum PhysicalProjectileConstruction
@@ -37,7 +39,40 @@ namespace BallisticPenetration.Core.Physics
         MonolithicCopper = 4,
         MonolithicSteel = 5,
         FrangibleComposite = 6,
-        TargetMaterial = 7
+        TargetMaterial = 7,
+        AluminumCoreJacketed = 8,
+        CopperAlloyCoreJacketed = 9,
+        SteelPenetratorLeadCoreJacketed = 10,
+        SteelPenetratorCopperCoreJacketed = 11,
+        SteelPenetratorAluminumCoreJacketed = 12,
+        MonolithicBrass = 13,
+        MonolithicZinc = 14,
+        NonMetallicComposite = 15,
+        MonolithicLead = 16
+    }
+
+    /// <summary>
+    /// Projectile terminal-design family. Construction identifies the material system; this value
+    /// identifies how the nose, jacket, penetrator, or payload is intended to behave on impact.
+    /// </summary>
+    public enum PhysicalProjectileDesignClass
+    {
+        Unknown = 0,
+        FullMetalJacket = 1,
+        SemiJacketed = 2,
+        HollowPoint = 3,
+        SoftPoint = 4,
+        Expanding = 5,
+        PolymerTipped = 6,
+        OpenTip = 7,
+        SabotedPenetrator = 8,
+        ExposedPenetrator = 9,
+        Frangible = 10,
+        Solid = 11,
+        Fragment = 12,
+        Payload = 13,
+        Shot = 14,
+        Flechette = 15
     }
 
     public enum PhysicalMaterialClass

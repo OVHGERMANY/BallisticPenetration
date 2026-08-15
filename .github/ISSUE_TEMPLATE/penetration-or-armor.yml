@@ -1,0 +1,129 @@
+name: Penetration or Armor Behavior
+description: Report an incorrect stop, penetration, ricochet, armor result, or durability change.
+title: "[Penetration or Armor]: "
+labels: ["bug", "penetration", "armor", "needs-reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing the community alpha. Do not upload your game directory or any EFT DLL or asset. Review logs and reports for personal information before attaching them.
+  - type: input
+    id: build
+    attributes:
+      label: Mod version, release tag, and exact commit SHA
+      placeholder: "1.3.0; v1.3.0-alpha.1; 40-character commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: SPT version, EFT version, and operating system
+      placeholder: "SPT 4.1.2; EFT 0.16.9.40743; Windows 11 24H2"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Relevant hardware
+      description: CPU, GPU, RAM, and storage type when relevant.
+      placeholder: "Ryzen 7 7800X3D, RTX 4070, 32 GB RAM, NVMe"
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Installed mod list
+      description: Include exact versions. Do not upload the mod or game folders.
+    validations:
+      required: true
+  - type: dropdown
+    id: lab-enabled
+    attributes:
+      label: Was the optional telemetry tool enabled?
+      options:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    validations:
+      required: true
+  - type: input
+    id: ammunition
+    attributes:
+      label: Ammunition template ID or displayed round name
+      placeholder: "Template ID and displayed name, or Not applicable"
+    validations:
+      required: true
+  - type: input
+    id: weapon
+    attributes:
+      label: Weapon and barrel
+      placeholder: "Weapon, barrel length, muzzle device, or Not applicable"
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Target, armor, or material
+      placeholder: "Target type, armor plate, material, layers, spacing, or Not applicable"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Exact reproduction steps
+      description: Number every step from a fresh game launch.
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Reproduction frequency
+      options:
+        - "Every time"
+        - "Often"
+        - "Sometimes"
+        - "Once"
+        - "Unknown"
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Paste only relevant settings. Remove personal paths or identifiers.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpt
+      description: Include the first error and its stack trace. Redact personal information first.
+      render: text
+  - type: textarea
+    id: report
+    attributes:
+      label: Optional telemetry JSON or CSV report
+      description: Attach the smallest relevant report when available, after reviewing and redacting it.
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshot or video
+      description: Drag useful media here. Do not include private overlays or unrelated windows.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Submission check
+      options:
+        - label: I did not attach proprietary EFT files or my full game directory, and I reviewed all evidence for personal information.
+          required: true

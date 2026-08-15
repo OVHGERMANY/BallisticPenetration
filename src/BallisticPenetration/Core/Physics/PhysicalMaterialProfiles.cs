@@ -142,7 +142,7 @@ namespace BallisticPenetration.Core.Physics
             }
 
             if (input.Construction <= PhysicalProjectileConstruction.Unknown
-                || input.Construction > PhysicalProjectileConstruction.TargetMaterial)
+                || input.Construction > PhysicalProjectileConstruction.MonolithicLead)
             {
                 failureReason = PhysicalMaterialProfileFailureReason.ConstructionInvalid;
                 return false;

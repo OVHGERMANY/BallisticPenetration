@@ -146,8 +146,9 @@ namespace BallisticPenetration.Core.Physics
 
         /// <summary>
         /// Position at which a surviving component begins its next free-flight leg. A penetrated,
-        /// deviated, or fragmented component starts at the measured far face; a ricocheted or
-        /// stopped component remains at the impact face.
+        /// deviated, or fragmented component starts at the measured far face. Ricochet and stop
+        /// responses remain at the impact face; a stopped component's stored center is embedded
+        /// separately so its physical model does not protrude halfway out of the target.
         /// </summary>
         public PhysicalVector3 OutputPositionMetres { get; }
 
@@ -364,6 +365,16 @@ namespace BallisticPenetration.Core.Physics
             double deformationDriveJoules = normalImpactEnergyJoules
                 * projectileProfile.DeformationEnergyCoupling
                 * targetProfile.ProjectileDeformationCoupling;
+            double expansionResponse = PhysicalProjectileDesignResponse.GetExpansionResponse(
+                parent.DesignClass);
+            double fractureResponse = PhysicalProjectileDesignResponse.GetFractureResponse(
+                parent.DesignClass);
+            if (!IsFinitePositive(expansionResponse) || !IsFinitePositive(fractureResponse))
+            {
+                failureReason = PhysicalDeformationFailureReason.WorkCalculationInvalid;
+                return false;
+            }
+
             double rawDeformationWorkJoules = Math.Min(
                 deformationCapacityJoules,
                 deformationDriveJoules);
@@ -372,7 +383,8 @@ namespace BallisticPenetration.Core.Physics
             double brittleResponse = 0.05d + (0.95d * projectileProfile.Brittleness);
             double fractureDriveJoules = normalImpactEnergyJoules
                 * targetProfile.ProjectileFractureCoupling
-                * brittleResponse;
+                * brittleResponse
+                * fractureResponse;
             double fractureProbability = CalculateFractureProbability(
                 fractureDriveJoules,
                 fractureThresholdJoules);
@@ -475,10 +487,12 @@ namespace BallisticPenetration.Core.Physics
                 deformationWorkJoules / deformationCapacityJoules,
                 0d,
                 1d);
-            double diameterExpansionRatio = 1d
-                + ((projectileProfile.MaximumDiameterExpansionRatio - 1d)
+            double diameterExpansionRatio = Math.Min(
+                projectileProfile.MaximumDiameterExpansionRatio,
+                1d + ((projectileProfile.MaximumDiameterExpansionRatio - 1d)
                     * deformationSeverity
-                    * projectileProfile.Ductility);
+                    * projectileProfile.Ductility
+                    * expansionResponse));
             double fragmentMassFraction = 0d;
             if (input.ObservedOutcome == PhysicalCollisionOutcome.Fragmented)
             {
@@ -747,6 +761,18 @@ namespace BallisticPenetration.Core.Physics
             PhysicalVector3 velocity = isMovingOutcome
                 ? outgoingDirection.Scale(residualSpeedMetresPerSecond)
                 : PhysicalVector3.Zero;
+            PhysicalVector3 statePositionMetres = outputPositionMetres;
+            if (!isMovingOutcome
+                && parent.VelocityMetresPerSecond.TryNormalize(
+                    out PhysicalVector3 incomingDirection))
+            {
+                double embeddedCenterDepthMetres = Math.Min(
+                    lengthMetres * 0.5d,
+                    input.EffectivePathLengthMetres);
+                statePositionMetres = input.ImpactPositionMetres.Add(
+                    incomingDirection.Scale(embeddedCenterDepthMetres));
+            }
+
             var stateInput = new PhysicalProjectileStateInput
             {
                 Kind = SelectProjectileKind(parent, deformationSeverity),
@@ -761,6 +787,7 @@ namespace BallisticPenetration.Core.Physics
                 FragmentGeneration = parent.FragmentGeneration,
                 DeterministicSeed = parent.DeterministicSeed,
                 Construction = parent.Construction,
+                DesignClass = parent.DesignClass,
                 ShapeClass = shapeClass,
                 OriginalMassKilograms = parent.OriginalMassKilograms,
                 RetainedMassKilograms = retainedPrimaryMassKilograms,
@@ -769,7 +796,7 @@ namespace BallisticPenetration.Core.Physics
                 ProjectedAreaSquareMetres = projectedAreaSquareMetres,
                 LengthMetres = lengthMetres,
                 DragCoefficient = dragCoefficient,
-                PositionMetres = outputPositionMetres,
+                PositionMetres = statePositionMetres,
                 VelocityMetresPerSecond = velocity,
                 Orientation = outputOrientation,
                 YawAngleRadians = yawAngleRadians,
@@ -859,7 +886,7 @@ namespace BallisticPenetration.Core.Physics
                 return PhysicalProjectileShapeClass.IrregularProjectileFragment;
             }
 
-            if (diameterExpansionRatio > 1.02d || deformationSeverity > 0.1d)
+            if (diameterExpansionRatio > 1.02d)
             {
                 return PhysicalProjectileShapeClass.ExpandedMushroom;
             }

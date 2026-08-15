@@ -68,9 +68,68 @@ namespace BallisticPenetration.Core.Physics
                     return 0.28d;
                 case PhysicalProjectileConstruction.FrangibleComposite:
                     return 0.36d;
+                case PhysicalProjectileConstruction.AluminumCoreJacketed:
+                    return 0.32d;
+                case PhysicalProjectileConstruction.CopperAlloyCoreJacketed:
+                    return 0.30d;
+                case PhysicalProjectileConstruction.SteelPenetratorLeadCoreJacketed:
+                    return 0.29d;
+                case PhysicalProjectileConstruction.SteelPenetratorCopperCoreJacketed:
+                    return 0.28d;
+                case PhysicalProjectileConstruction.SteelPenetratorAluminumCoreJacketed:
+                    return 0.28d;
+                case PhysicalProjectileConstruction.MonolithicBrass:
+                    return 0.31d;
+                case PhysicalProjectileConstruction.MonolithicZinc:
+                    return 0.33d;
+                case PhysicalProjectileConstruction.NonMetallicComposite:
+                    return 0.40d;
+                case PhysicalProjectileConstruction.MonolithicLead:
+                    return 0.34d;
                 default:
                     return double.NaN;
             }
+        }
+
+        public static double GetNominalDragCoefficient(
+            PhysicalProjectileConstruction construction,
+            PhysicalProjectileDesignClass designClass,
+            PhysicalProjectileShapeClass shapeClass)
+        {
+            double baseCoefficient = GetNominalDragCoefficient(construction);
+            double designMultiplier = PhysicalProjectileDesignResponse.GetInitialDragMultiplier(
+                designClass);
+            double shapeMultiplier;
+            switch (shapeClass)
+            {
+                case PhysicalProjectileShapeClass.Spitzer:
+                    shapeMultiplier = 1d;
+                    break;
+                case PhysicalProjectileShapeClass.RoundNose:
+                    shapeMultiplier = 1.12d;
+                    break;
+                case PhysicalProjectileShapeClass.FlatNose:
+                    shapeMultiplier = 1.25d;
+                    break;
+                case PhysicalProjectileShapeClass.IrregularProjectileFragment:
+                    shapeMultiplier = 1.80d;
+                    break;
+                case PhysicalProjectileShapeClass.SphericalShot:
+                    shapeMultiplier = 1.65d;
+                    break;
+                case PhysicalProjectileShapeClass.Flechette:
+                    shapeMultiplier = 0.65d;
+                    break;
+                default:
+                    return double.NaN;
+            }
+
+            double coefficient = baseCoefficient * designMultiplier * shapeMultiplier;
+            return !double.IsNaN(coefficient)
+                && !double.IsInfinity(coefficient)
+                && coefficient > 0d
+                    ? coefficient
+                    : double.NaN;
         }
 
         private static Dictionary<PhysicalProjectileConstruction, PhysicalProjectileMaterialProfile>
@@ -185,6 +244,168 @@ namespace BallisticPenetration.Core.Physics
                 1.40d,
                 0.12d,
                 0.40d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.AluminumCoreJacketed,
+                "default-projectile-aluminum-core-jacketed",
+                4000d,
+                55000000d,
+                18000d,
+                0.45d,
+                0.35d,
+                0.55d,
+                1.45d,
+                0.08d,
+                0.45d,
+                0.55d,
+                2.6d,
+                1.15d,
+                0.18d,
+                0.65d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.CopperAlloyCoreJacketed,
+                "default-projectile-copper-alloy-core-jacketed",
+                8800d,
+                130000000d,
+                42000d,
+                0.75d,
+                0.12d,
+                0.58d,
+                1.75d,
+                0.03d,
+                0.25d,
+                0.50d,
+                2.2d,
+                1.05d,
+                0.20d,
+                0.72d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.SteelPenetratorLeadCoreJacketed,
+                "default-projectile-steel-penetrator-lead-core-jacketed",
+                9200d,
+                120000000d,
+                30000d,
+                0.48d,
+                0.35d,
+                0.48d,
+                1.45d,
+                0.06d,
+                0.40d,
+                0.42d,
+                2.2d,
+                1.00d,
+                0.18d,
+                0.65d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.SteelPenetratorCopperCoreJacketed,
+                "default-projectile-steel-penetrator-copper-core-jacketed",
+                8250d,
+                175000000d,
+                40000d,
+                0.45d,
+                0.38d,
+                0.43d,
+                1.35d,
+                0.06d,
+                0.35d,
+                0.36d,
+                2.0d,
+                0.95d,
+                0.17d,
+                0.62d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.SteelPenetratorAluminumCoreJacketed,
+                "default-projectile-steel-penetrator-aluminum-core-jacketed",
+                5200d,
+                150000000d,
+                30000d,
+                0.32d,
+                0.48d,
+                0.42d,
+                1.30d,
+                0.08d,
+                0.42d,
+                0.38d,
+                2.1d,
+                1.00d,
+                0.17d,
+                0.60d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.MonolithicBrass,
+                "default-projectile-monolithic-brass",
+                8500d,
+                110000000d,
+                38000d,
+                0.70d,
+                0.16d,
+                0.58d,
+                1.75d,
+                0.03d,
+                0.28d,
+                0.52d,
+                2.3d,
+                1.10d,
+                0.20d,
+                0.72d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.MonolithicZinc,
+                "default-projectile-monolithic-zinc",
+                7140d,
+                70000000d,
+                26000d,
+                0.45d,
+                0.35d,
+                0.58d,
+                1.50d,
+                0.05d,
+                0.38d,
+                0.58d,
+                2.6d,
+                1.15d,
+                0.19d,
+                0.66d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.NonMetallicComposite,
+                "default-projectile-nonmetallic-composite",
+                1800d,
+                8000000d,
+                6000d,
+                0.20d,
+                0.60d,
+                0.65d,
+                1.25d,
+                0.20d,
+                0.85d,
+                0.82d,
+                4.5d,
+                1.45d,
+                0.10d,
+                0.35d);
+            AddProjectileProfile(
+                profiles,
+                PhysicalProjectileConstruction.MonolithicLead,
+                "default-projectile-monolithic-lead",
+                11340d,
+                15000000d,
+                8000d,
+                0.95d,
+                0.05d,
+                0.65d,
+                2.50d,
+                0.02d,
+                0.20d,
+                0.70d,
+                3.0d,
+                1.20d,
+                0.22d,
+                0.75d);
             return profiles;
         }
 
