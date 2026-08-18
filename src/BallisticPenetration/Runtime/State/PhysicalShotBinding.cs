@@ -20,7 +20,8 @@ namespace BallisticPenetration.Runtime.State
             PhysicalProjectileState state,
             float eftDamage,
             float eftPenetrationPower,
-            float eftBallisticCoefficient)
+            float eftBallisticCoefficient,
+            bool targetWasAlreadyDead)
         {
             if (shot == null)
             {
@@ -40,6 +41,10 @@ namespace BallisticPenetration.Runtime.State
             EftDamage = eftDamage;
             EftPenetrationPower = eftPenetrationPower;
             EftBallisticCoefficient = eftBallisticCoefficient;
+            CreationTimeSeconds = Time.realtimeSinceStartupAsDouble;
+            CreationPosition = shot.CurrentPosition;
+            CreationVelocity = shot.CurrentVelocity;
+            TargetWasAlreadyDead = targetWasAlreadyDead;
             Incarnation = new PhysicalShotIncarnation(shot);
         }
 
@@ -50,6 +55,14 @@ namespace BallisticPenetration.Runtime.State
         internal float EftPenetrationPower { get; }
 
         internal float EftBallisticCoefficient { get; }
+
+        internal double CreationTimeSeconds { get; }
+
+        internal Vector3 CreationPosition { get; }
+
+        internal Vector3 CreationVelocity { get; }
+
+        internal bool TargetWasAlreadyDead { get; }
 
         internal PhysicalShotIncarnation Incarnation { get; }
 
@@ -131,7 +144,8 @@ namespace BallisticPenetration.Runtime.State
             PhysicalProjectileState state,
             float eftDamage,
             float eftPenetrationPower,
-            float eftBallisticCoefficient)
+            float eftBallisticCoefficient,
+            bool targetWasAlreadyDead)
         {
             if (shot == null)
             {
@@ -143,7 +157,8 @@ namespace BallisticPenetration.Runtime.State
                 state,
                 eftDamage,
                 eftPenetrationPower,
-                eftBallisticCoefficient);
+                eftBallisticCoefficient,
+                targetWasAlreadyDead);
 
             if (!binding.Matches(shot))
             {

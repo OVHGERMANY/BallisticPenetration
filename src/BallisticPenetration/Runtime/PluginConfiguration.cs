@@ -131,6 +131,12 @@ namespace BallisticPenetration.Runtime
                 false,
                 "Log each successfully applied collision adjustment. This can be noisy during raids.");
 
+            LogPhysicalProjectileLifecycle = config.Bind(
+                "Diagnostics",
+                "Log Physical Projectile Lifecycle",
+                false,
+                "Log bounded creation, collision, binding, and visual-retirement evidence for physical projectiles and fragments. This does not change projectile behavior.");
+
             EnableInGameDiagnostics = config.Bind(
                 "Diagnostics",
                 "Enable In-Game Diagnostics",
@@ -209,6 +215,8 @@ namespace BallisticPenetration.Runtime
         internal ConfigEntry<float> DamageExponent { get; private set; }
 
         internal ConfigEntry<bool> LogAdjustments { get; private set; }
+
+        internal ConfigEntry<bool> LogPhysicalProjectileLifecycle { get; private set; }
 
         internal ConfigEntry<bool> EnableInGameDiagnostics { get; private set; }
 

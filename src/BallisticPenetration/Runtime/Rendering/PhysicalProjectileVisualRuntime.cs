@@ -6,6 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using BallisticPenetration.Core.Physics;
+using BallisticPenetration.Runtime.Diagnostics;
 using BallisticPenetration.Runtime.State;
 using EFT.Ballistics;
 using UnityEngine;
@@ -267,7 +268,7 @@ namespace BallisticPenetration.Runtime.Rendering
                             if (command.Binding != null
                                 && TokenByBinding.TryGetValue(command.Binding, out long token))
                             {
-                                RemoveActive(token);
+                                RemoveActive(token, "binding-retired");
                             }
 
                             break;
@@ -299,7 +300,7 @@ namespace BallisticPenetration.Runtime.Rendering
 
             if (TokenByBinding.TryGetValue(command.Binding, out long existingToken))
             {
-                RemoveActive(existingToken);
+                RemoveActive(existingToken, "binding-reregistered");
             }
 
             EnsureTrackedCapacity(policy.MaximumTrackedComponents);
@@ -349,6 +350,11 @@ namespace BallisticPenetration.Runtime.Rendering
                 ActiveVisual visual = pair.Value;
                 if (!visual.TryUpdatePosition(now, out Vector3 position))
                 {
+                    PhysicalProjectileLifecycleDiagnostics.Record(
+                        "visual-retired",
+                        visual.Shot,
+                        visual.Binding,
+                        visual.RetirementReason);
                     RetirementBuffer.Add(pair.Key);
                     continue;
                 }
@@ -368,7 +374,7 @@ namespace BallisticPenetration.Runtime.Rendering
 
             for (int index = 0; index < RetirementBuffer.Count; index++)
             {
-                RemoveActive(RetirementBuffer[index]);
+                RemoveActive(RetirementBuffer[index], "visual-invalid", false);
             }
 
             CandidateBuffer.Sort(CompareCandidates);
@@ -659,7 +665,7 @@ namespace BallisticPenetration.Runtime.Rendering
             while (ActiveByToken.Count >= maximumTrackedComponents
                 && RegistrationOrder.First != null)
             {
-                RemoveActive(RegistrationOrder.First.Value);
+                RemoveActive(RegistrationOrder.First.Value, "tracked-capacity");
             }
         }
 
@@ -668,7 +674,7 @@ namespace BallisticPenetration.Runtime.Rendering
             while (ActiveByToken.Count > maximumTrackedComponents
                 && RegistrationOrder.First != null)
             {
-                RemoveActive(RegistrationOrder.First.Value);
+                RemoveActive(RegistrationOrder.First.Value, "tracked-capacity");
             }
         }
 
@@ -686,11 +692,23 @@ namespace BallisticPenetration.Runtime.Rendering
             TrimSlotPool(maximumVisibleComponents);
         }
 
-        private static void RemoveActive(long token)
+        private static void RemoveActive(
+            long token,
+            string reason = "renderer-clear",
+            bool recordLifecycle = true)
         {
             if (!ActiveByToken.TryGetValue(token, out ActiveVisual visual))
             {
                 return;
+            }
+
+            if (recordLifecycle)
+            {
+                PhysicalProjectileLifecycleDiagnostics.Record(
+                    "visual-retired",
+                    visual.Shot,
+                    visual.Binding,
+                    reason);
             }
 
             ReleaseSlot(visual);
@@ -928,6 +946,8 @@ namespace BallisticPenetration.Runtime.Rendering
 
             internal double DistanceSquaredMetres { get; set; }
 
+            internal string RetirementReason { get; private set; } = "none";
+
             internal LinkedListNode<long>? OrderNode { get; set; }
 
             internal bool HasLease { get; private set; }
@@ -954,7 +974,13 @@ namespace BallisticPenetration.Runtime.Rendering
                 position = CurrentPosition;
                 if (Embedded)
                 {
-                    return now <= ExpiresAt && IsFiniteVector(position);
+                    bool remainsActive = now <= ExpiresAt && IsFiniteVector(position);
+                    RetirementReason = remainsActive
+                        ? "none"
+                        : now > ExpiresAt
+                            ? "embedded-expired"
+                            : "embedded-position-invalid";
+                    return remainsActive;
                 }
 
                 if (Shot == null
@@ -965,6 +991,7 @@ namespace BallisticPenetration.Runtime.Rendering
                         out PhysicalShotBinding? currentBinding)
                     || !ReferenceEquals(currentBinding, Binding))
                 {
+                    RetirementReason = "binding-missing-or-recycled";
                     return false;
                 }
 
@@ -979,12 +1006,14 @@ namespace BallisticPenetration.Runtime.Rendering
                         PhysicalImpactGeometryResolver.ToPhysical(velocity),
                         out PhysicalOrientation visualOrientation))
                 {
+                    RetirementReason = "non-finite-or-zero-velocity";
                     return false;
                 }
 
                 CurrentPosition = current;
                 CurrentOrientation = visualOrientation;
                 position = current;
+                RetirementReason = "none";
                 return true;
             }
 

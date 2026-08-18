@@ -6,6 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using BallisticPenetration.Core;
 using BallisticPenetration.Core.Physics;
+using BallisticPenetration.Runtime.Diagnostics;
 using BallisticPenetration.Runtime.State;
 using BallisticPenetration.Runtime.Rendering;
 using EFT.Ballistics;
@@ -93,6 +94,12 @@ namespace BallisticPenetration.Runtime
             {
                 return PhysicalBoundFlightResult.NotBound;
             }
+
+            PhysicalProjectileLifecycleDiagnostics.Record(
+                "collision-observed",
+                shot,
+                binding,
+                "bound-flight-capture");
 
             var flightInput = new PhysicalFlightStateInput
             {
@@ -272,6 +279,11 @@ namespace BallisticPenetration.Runtime
 
                     if (collisionState.SourceBinding != null)
                     {
+                        PhysicalProjectileLifecycleDiagnostics.Record(
+                            "retired",
+                            shot,
+                            collisionState.SourceBinding,
+                            "terminal-stop");
                         PhysicalShotBindingStore.RemoveIfSame(
                             shot,
                             collisionState.SourceBinding);
@@ -384,6 +396,11 @@ namespace BallisticPenetration.Runtime
 
                 if (collisionState.SourceBinding != null)
                 {
+                    PhysicalProjectileLifecycleDiagnostics.Record(
+                        "retired",
+                        shot,
+                        collisionState.SourceBinding,
+                        "collision-replaced");
                     PhysicalShotBindingStore.RemoveIfSame(
                         shot,
                         collisionState.SourceBinding);
@@ -533,6 +550,7 @@ namespace BallisticPenetration.Runtime
             }
 
             bool complete = false;
+            bool targetWasAlreadyDead = WasTargetAlreadyDead(parent);
             try
             {
                 for (int index = 0; index < components.Count; index++)
@@ -584,8 +602,14 @@ namespace BallisticPenetration.Runtime
                         component,
                         child.Damage,
                         child.PenetrationPower,
-                        child.BallisticCoefficient);
+                        child.BallisticCoefficient,
+                        targetWasAlreadyDead);
                     bindings.Add(binding);
+                    PhysicalProjectileLifecycleDiagnostics.Record(
+                        "created",
+                        child,
+                        binding,
+                        "physical-continuation-created");
                     Plugin.LogPhysicalComponentProjected(
                         collisionState,
                         component,
@@ -792,6 +816,11 @@ namespace BallisticPenetration.Runtime
             int boundCount = Math.Min(replacements.Count, bindings.Count);
             for (int index = 0; index < boundCount; index++)
             {
+                PhysicalProjectileLifecycleDiagnostics.Record(
+                    "retired",
+                    replacements[index],
+                    bindings[index],
+                    "transaction-abort");
                 PhysicalShotBindingStore.RemoveIfSame(
                     replacements[index],
                     bindings[index]);
@@ -825,6 +854,22 @@ namespace BallisticPenetration.Runtime
             {
                 Plugin.LogHookFailure("Physical child cleanup", exception);
             }
+        }
+
+        private static bool WasTargetAlreadyDead(Shot parent)
+        {
+            if (parent?.HittedBallisticCollider is not BodyPartCollider collider)
+            {
+                return false;
+            }
+
+            EFT.Player? player = collider.Player as EFT.Player;
+            if (player?.HealthController != null && !player.HealthController.IsAlive)
+            {
+                return true;
+            }
+
+            return collider.GetComponentInParent<EFT.Interactive.Corpse>() != null;
         }
 
         private static bool TryGetDirection(Vector3 value, out PhysicalVector3 direction)
