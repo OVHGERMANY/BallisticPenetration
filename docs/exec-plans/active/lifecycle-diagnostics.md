@@ -2,15 +2,15 @@
 
 ## Requirements
 - [x] Track and log `ballisticTerminal` and `lifecycleTerminal` states for each observed physical projectile event.
-- [ ] Track `continued` and `replaced` flags with explicit semantics:
-  - Stopped: `continued=false`, `replaced=false`, `ballisticTerminal=true`, `lifecycleTerminal=true`.
+- [x] Track `continued` and `replaced` flags with explicit semantics:
+  - Stopped resolved event: `continued=false`, `replaced=false`, `ballisticTerminal=true`, `lifecycleTerminal=false`.
   - Continued same projectile: `continued=true`, `replaced=false`, `ballisticTerminal=false`, `lifecycleTerminal=false`.
   - Continued via replacement: original gets `continued=true`, `replaced=true`, `ballisticTerminal=false`, `lifecycleTerminal=true`; replacement must get new lifecycle identity.
   - Runtime/runtime-abort retirement: `lifecycleTerminal=true`, `ballisticTerminal=false`, `lifecycleEndReason=aborted`.
-- [ ] Emit collision phase records: `event=collision-observed` then `event=collision-resolved`.
-- [ ] Deduplicate by `(projectileIdentity, collisionSequence)` so each phase is emitted once.
-- [ ] Keep both `recordSequence` and derived per-lifecycle `collisionOrdinal`.
-- [ ] Add bounded trackers with lifecycle tombstones and duplicate-terminal detection.
+- [x] Emit collision phase records: `event=collision-observed` then `event=collision-resolved`.
+- [x] Deduplicate by `(projectileIdentity, collisionIdentity, phase)` so each phase is emitted once.
+- [x] Keep both `recordSequence` and derived per-lifecycle `collisionOrdinal`.
+- [x] Add bounded trackers with lifecycle tombstones and duplicate-terminal detection.
 - [ ] Emit `terminal-missing` for terminal-lifecycle gaps and `terminal-duplicate` on repeats.
 - [ ] Add explicit `shutdown-cleanup` marker to exclude expected unload cleanup from missing-terminal defects.
 - [ ] Keep gameplay behavior untouched.
@@ -29,9 +29,9 @@
 
 ## Latest Validation and Checkpoint
 - Build result: `dotnet build ... -p:TreatWarningsAsErrors=true` succeeded, 0 warnings, 0 errors.
-- Validation result: `dotnet run --project BallisticPenetration.Validation...` => 46 passed, 0 failed.
+- Validation result: `dotnet run --project BallisticPenetration.Validation...` => 47 passed, 0 failed.
 - Gameplay behavior: diagnostics-only changes for terminal telemetry fields; no trajectory, velocity, penetration, damage, fragments, collision outcomes, or branch logic modified.
-- Next action: `collision-observed`/`collision-resolved` correlation and deduplication.
+- Next action: `terminal-missing`/`terminal-duplicate` diagnostics and explicit shutdown-cleanup marker.
 
 ## Installation Steps
 - Build release DLL.

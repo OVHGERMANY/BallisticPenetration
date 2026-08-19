@@ -131,6 +131,9 @@ namespace BallisticPenetration.Validation
                 delegate { ValidatePhysicalAmmunitionPolicy(itemsPath); });
             Run("Physical transition telemetry snapshots and observer isolation", ValidatePhysicalTelemetry);
             Run("Physical transition identities use exact component state", ValidatePhysicalTransitionIdentity);
+            Run(
+                "Physical collision observed/resolved correlation and deduplication",
+                ValidatePhysicalCollisionObservedResolvedCorrelation);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical child seeds stay inside the host random table", ValidatePhysicalHostRandomSeed);
@@ -957,6 +960,114 @@ namespace BallisticPenetration.Validation
                 "transition identity carries exact component identity",
                 firstIdentity.StartsWith("component-a-collision-", StringComparison.Ordinal)
                     && secondIdentity.StartsWith("component-b-collision-", StringComparison.Ordinal));
+        }
+
+        private static void ValidatePhysicalCollisionObservedResolvedCorrelation()
+        {
+            var rootInput = CreateValidRootInput(800d, 0.01d, 0.0095d);
+            PhysicalCollisionRecord previousCollision = CreateCollisionRecordOrThrow(
+                CreateCollisionInput(0, PhysicalCollisionOutcome.Penetrated));
+            rootInput.CollisionHistory = new[] { previousCollision };
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(rootInput);
+            int expectedRecordSequence = parent.CollisionHistory.Count;
+            string expectedCollisionId = PhysicalProjectileTransitionIdentity.CreateCollisionId(parent);
+            PhysicalCollisionRecord resolvedCollision = CreateCollisionRecordOrThrow(
+                CreateCollisionInput(expectedRecordSequence, PhysicalCollisionOutcome.Penetrated));
+
+            AssertEqual(
+                "collision identity sequence starts from next collision",
+                parent.CollisionHistory.Count,
+                resolvedCollision.Sequence);
+
+            AssertEqual(
+                "collision sequence and per-projectile ordinal align",
+                expectedRecordSequence,
+                ResolveCollisionOrdinalFromSequence(resolvedCollision.Sequence));
+
+            var tracker = new PhysicalCollisionObservedResolvedTracker();
+            AssertTrue(
+                "first observed event is emitted",
+                tracker.TryEmit(
+                    parent.ProjectileId,
+                    expectedCollisionId,
+                    "observed",
+                    expectedRecordSequence));
+            AssertTrue(
+                "first resolved event is emitted",
+                tracker.TryEmit(
+                    parent.ProjectileId,
+                    expectedCollisionId,
+                    "resolved",
+                    resolvedCollision.Sequence));
+
+            AssertTrue(
+                "duplicate observed event is suppressed",
+                !tracker.TryEmit(
+                    parent.ProjectileId,
+                    expectedCollisionId,
+                    "observed",
+                    expectedRecordSequence));
+            AssertTrue(
+                "duplicate resolved event is suppressed",
+                !tracker.TryEmit(
+                    parent.ProjectileId,
+                    expectedCollisionId,
+                    "resolved",
+                    resolvedCollision.Sequence));
+
+            string replacementCollisionIdentity = parent.ProjectileId + "-collision-" + (expectedRecordSequence + 1);
+            AssertTrue(
+                "distinct collision for same projectile still records",
+                tracker.TryEmit(
+                    parent.ProjectileId,
+                    replacementCollisionIdentity,
+                    "observed",
+                    expectedRecordSequence + 1));
+
+            string otherProjectile = "other-" + parent.ProjectileId;
+            AssertTrue(
+                "same recordSequence on different projectiles does not dedupe",
+                tracker.TryEmit(
+                    otherProjectile,
+                    expectedCollisionId,
+                    "observed",
+                    expectedRecordSequence));
+
+            ResolvedLifecycleSemantics stopped = CalculateResolvedLifecycleSemantics(
+                PhysicalCollisionOutcome.Stopped,
+                false);
+            AssertTrue(
+                "stopped resolved event is ballistic and not lifecycle terminal",
+                stopped.BallisticTerminal && !stopped.LifecycleTerminal && stopped.ResolutionKnown);
+            AssertTrue(
+                "stopped resolved event remains continuation false, replaced false",
+                !stopped.Continued && !stopped.Replaced);
+
+            ResolvedLifecycleSemantics sameProjectile = CalculateResolvedLifecycleSemantics(
+                PhysicalCollisionOutcome.Penetrated,
+                false);
+            AssertTrue(
+                "same-projectile continuation remains non-ballistic",
+                !sameProjectile.BallisticTerminal && sameProjectile.ResolutionKnown);
+            AssertTrue(
+                "same-projectile continuation sets continued true and replaced false",
+                sameProjectile.Continued && !sameProjectile.Replaced);
+
+            ResolvedLifecycleSemantics replacement = CalculateResolvedLifecycleSemantics(
+                PhysicalCollisionOutcome.Penetrated,
+                true);
+            AssertTrue(
+                "replacement continuation sets continued true and replaced true",
+                replacement.Continued && replacement.Replaced);
+
+            tracker.Retire(parent.ProjectileId);
+            AssertTrue(
+                "dedupe state is cleared on retirement",
+                tracker.TryEmit(
+                    parent.ProjectileId,
+                    expectedCollisionId,
+                    "resolved",
+                    resolvedCollision.Sequence));
         }
 
         private static void ValidatePhysicalVisualGeometry()
@@ -4933,6 +5044,16 @@ namespace BallisticPenetration.Validation
             };
         }
 
+        private static PhysicalCollisionRecordInput CreateCollisionInput(
+            int sequence,
+            PhysicalCollisionOutcome outcome)
+        {
+            PhysicalCollisionRecordInput input = CreateValidCollisionInput();
+            input.Sequence = sequence;
+            input.Outcome = outcome;
+            return input;
+        }
+
         private static PhysicalCollisionRecord CreateValidCollisionRecord()
         {
             return CreateCollisionRecordOrThrow(CreateValidCollisionInput());
@@ -4971,6 +5092,74 @@ namespace BallisticPenetration.Validation
                 EffectivePathLengthMetres = record.EffectivePathLengthMetres,
                 Outcome = record.Outcome
             };
+        }
+
+        private static int ResolveCollisionOrdinalFromSequence(int? recordSequence)
+        {
+            return recordSequence ?? 0;
+        }
+
+        private static ResolvedLifecycleSemantics CalculateResolvedLifecycleSemantics(
+            PhysicalCollisionOutcome outcome,
+            bool replaced)
+        {
+            bool ballisticTerminal = outcome == PhysicalCollisionOutcome.Stopped;
+            return new ResolvedLifecycleSemantics
+            {
+                BallisticTerminal = ballisticTerminal,
+                LifecycleTerminal = false,
+                ResolutionKnown = true,
+                Continued = outcome != PhysicalCollisionOutcome.Stopped,
+                Replaced = replaced
+            };
+        }
+
+        private sealed class ResolvedLifecycleSemantics
+        {
+            internal bool BallisticTerminal { get; set; }
+
+            internal bool LifecycleTerminal { get; set; }
+
+            internal bool ResolutionKnown { get; set; }
+
+            internal bool Continued { get; set; }
+
+            internal bool Replaced { get; set; }
+        }
+
+        private sealed class PhysicalCollisionObservedResolvedTracker
+        {
+            private readonly Dictionary<string, HashSet<(string CollisionIdentity, string Phase)>> _byProjectile
+                = new Dictionary<string, HashSet<(string, string)>>(StringComparer.Ordinal);
+
+            internal bool TryEmit(
+                string projectileId,
+                string collisionIdentity,
+                string phase,
+                int collisionSequence)
+            {
+                if (string.IsNullOrWhiteSpace(projectileId)
+                    || string.IsNullOrWhiteSpace(collisionIdentity)
+                    || string.IsNullOrWhiteSpace(phase))
+                {
+                    return false;
+                }
+
+                if (!_byProjectile.TryGetValue(
+                        projectileId,
+                        out HashSet<(string CollisionIdentity, string Phase)>? phases))
+                {
+                    phases = new HashSet<(string CollisionIdentity, string Phase)>();
+                    _byProjectile[projectileId] = phases;
+                }
+
+                return phases.Add((collisionIdentity, phase));
+            }
+
+            internal void Retire(string projectileId)
+            {
+                _byProjectile.Remove(projectileId);
+            }
         }
 
         private static PhysicalProjectileStateInput CopyPhysicalStateToInput(

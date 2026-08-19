@@ -95,12 +95,6 @@ namespace BallisticPenetration.Runtime
                 return PhysicalBoundFlightResult.NotBound;
             }
 
-            PhysicalProjectileLifecycleDiagnostics.Record(
-                "collision-observed",
-                shot,
-                binding,
-                "bound-flight-capture");
-
             var flightInput = new PhysicalFlightStateInput
             {
                 State = binding.State,
@@ -143,6 +137,13 @@ namespace BallisticPenetration.Runtime
             {
                 return PhysicalBoundFlightResult.Rejected;
             }
+
+            PhysicalProjectileLifecycleDiagnostics.RecordCollisionObserved(
+                shot,
+                collisionState.SourceBinding,
+                collisionState.TransitionId,
+                collisionState.ParentState.CollisionHistory.Count,
+                collisionState.TargetSurfaceIdentity);
 
             // HandleCollision has already applied vanilla degradation. Replace it only after the
             // complete physical collision state is valid, so a failed bridge remains a true no-op.
@@ -278,25 +279,35 @@ namespace BallisticPenetration.Runtime
                     }
 
                     if (collisionState.SourceBinding != null)
-                    {
-                        PhysicalProjectileLifecycleDiagnostics.Record(
-                            "retired",
-                            shot,
-                            collisionState.SourceBinding,
-                            "terminal-stop");
+                {
+                    PhysicalProjectileLifecycleDiagnostics.RecordCollisionResolved(
+                        shot,
+                        collisionState.SourceBinding,
+                        deformation.CollisionRecord,
+                        collisionState.TransitionId,
+                        false,
+                        false,
+                        collisionState.SourceBinding.TargetWasAlreadyDead,
+                        collisionState.TargetSurfaceIdentity);
+
+                    PhysicalProjectileLifecycleDiagnostics.Record(
+                        "retired",
+                        shot,
+                        collisionState.SourceBinding,
+                        "terminal-stop");
                         PhysicalShotBindingStore.RemoveIfSame(
                             shot,
                             collisionState.SourceBinding);
                         PhysicalProjectileVisualRuntime.Retire(
                             collisionState.SourceBinding);
-                    }
+                }
 
-                    PhysicalProjectileVisualRuntime.RegisterEmbedded(stoppedState);
-                    PhysicalProjectileTelemetryRuntime.PublishResolvedStopped(
-                        shot,
-                        collisionState,
-                        stoppedState,
-                        effectiveLossBudget);
+                PhysicalProjectileVisualRuntime.RegisterEmbedded(stoppedState);
+                PhysicalProjectileTelemetryRuntime.PublishResolvedStopped(
+                    shot,
+                    collisionState,
+                    stoppedState,
+                    effectiveLossBudget);
                     return true;
                 }
 
@@ -396,6 +407,16 @@ namespace BallisticPenetration.Runtime
 
                 if (collisionState.SourceBinding != null)
                 {
+                    PhysicalProjectileLifecycleDiagnostics.RecordCollisionResolved(
+                        shot,
+                        collisionState.SourceBinding,
+                        deformation.CollisionRecord,
+                        collisionState.TransitionId,
+                        true,
+                        true,
+                        collisionState.SourceBinding.TargetWasAlreadyDead,
+                        collisionState.TargetSurfaceIdentity);
+
                     PhysicalProjectileLifecycleDiagnostics.Record(
                         "retired",
                         shot,

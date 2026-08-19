@@ -6,10 +6,10 @@
 
 ## Runtime Branch / Commit
 - Branch: `development/physical-projectile-system`
-- HEAD: `2b216c1`
+- HEAD: `49800c9`
 
 ## Active Objective
-- Diagnostics-only per-collision and exactly-once lifecycle-terminal verification.
+- Diagnostics-only per-collision observed/resolved correlation and deduplication, with stopped resolved lifecycle-semantics fixed.
 - Gameplay physics must remain unchanged.
 
 ## Fixed Constraints
@@ -33,14 +33,18 @@
 - Updated terminal telemetry schema on physical projectile lifecycle diagnostics:
   - `ballisticTerminal` and `lifecycleTerminal` are Boolean (`true|false`) fields.
   - Added `lifecycleEndReason` (`none|stopped|replaced|aborted`) on all physical projectile lifecycle events.
+- Completed observed/resolved collision correlation and per-projectile dedupe in diagnostics with explicit duplicate suppression:
+  - `collision-observed` and `collision-resolved` share stable `collisionIdentity` and per-payload dedupe.
+  - Stopped outcomes emit resolved lifecycle exactly once with `continued=false` and `replaced=false`.
+  - Stopped resolved lifecycle now correctly reports `lifecycleTerminal=false`.
 - Validation passpoint checkpoint:
   - `dotnet build ... -c Release -p:SptRoot="E:\\Games\\SPT" -p:TreatWarningsAsErrors=true` succeeded (0 warnings, 0 errors).
-  - `dotnet run --project ...BallisticPenetration.Validation...` completed with `46 passed, 0 failed`.
+  - `dotnet run --project ...BallisticPenetration.Validation...` completed with `47 passed, 0 failed`.
 - Gameplay behavior unchanged; diagnostics-only modifications.
 
 ## Latest Build and Validation
 - BallisticPenetration build: succeeded with 0 warnings and 0 errors.
-- BallisticPenetration validation: `46 passed, 0 failed`.
+- BallisticPenetration validation: `47 passed, 0 failed`.
 - No gameplay kinematic/impact branches changed in this step.
 
 ## Deployment Paths and Hashes
@@ -58,4 +62,4 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Next milestone: collision-observed/collision-resolved correlation and deduplication.
+- Next milestone: terminal-missing and terminal-duplicate detection, duplicate-terminal guard, and explicit lifecycle retirement markers.
