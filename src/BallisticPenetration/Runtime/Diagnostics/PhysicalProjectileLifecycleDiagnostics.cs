@@ -55,6 +55,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     ? shot.CurrentVelocity
                     : Vector3.zero;
                 double now = Time.realtimeSinceStartupAsDouble;
+                bool ballisticTerminal = ResolveBallisticTerminalState(eventName, reason);
+                bool lifecycleTerminal = ResolveLifecycleTerminalState(eventName, reason);
+                string lifecycleEndReason = ResolveLifecycleEndReason(eventName, reason, state.TerminalState);
                 Plugin.Log?.LogInfo(
                     "Physical projectile lifecycle: event=" + eventName
                     + ", projectile=" + state.ProjectileId
@@ -70,6 +73,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     + ", lastVelocity=" + Format(currentVelocity)
                     + ", lastSpeed=" + Format(currentVelocity.magnitude)
                     + ", lastCollision=" + (lastCollision?.Outcome.ToString() ?? "none")
+                    + ", ballisticTerminal=" + ballisticTerminal.ToString().ToLowerInvariant()
+                    + ", lifecycleTerminal=" + lifecycleTerminal.ToString().ToLowerInvariant()
+                    + ", lifecycleEndReason=" + lifecycleEndReason
                     + ", terminalState=" + state.TerminalState
                     + ", targetAlreadyDead=" + binding.TargetWasAlreadyDead
                     + ", shotState=" + (shot?.BulletState.ToString() ?? "released")
@@ -79,6 +85,60 @@ namespace BallisticPenetration.Runtime.Diagnostics
             {
                 Plugin.LogHookFailure("Physical projectile lifecycle diagnostics", exception);
             }
+        }
+
+        private static bool ResolveBallisticTerminalState(
+            string eventName,
+            string reason)
+        {
+            return eventName == "retired" && reason == "terminal-stop";
+        }
+
+        private static bool ResolveLifecycleTerminalState(
+            string eventName,
+            string reason)
+        {
+            if (eventName == "retired"
+                && (reason == "terminal-stop"
+                    || reason == "collision-replaced"
+                    || reason == "transaction-abort"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string ResolveLifecycleEndReason(
+            string eventName,
+            string reason,
+            PhysicalProjectileTerminalState terminalState)
+        {
+            if (eventName == "retired")
+            {
+                if (reason == "terminal-stop")
+                {
+                    return "stopped";
+                }
+
+                if (reason == "collision-replaced")
+                {
+                    return "replaced";
+                }
+
+                if (reason == "transaction-abort")
+                {
+                    return "aborted";
+                }
+
+                // Preserve prior terminal state semantics for unexpected retired states only.
+                if (terminalState == PhysicalProjectileTerminalState.Stopped)
+                {
+                    return "stopped";
+                }
+            }
+
+            return "none";
         }
 
         private static string Format(Vector3 value)
