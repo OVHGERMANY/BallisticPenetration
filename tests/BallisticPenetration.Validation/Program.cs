@@ -7,6 +7,7 @@ using System.IO;
 using System.Security;
 using System.Text.Json;
 using BallisticPenetration.Core;
+using BallisticPenetration.Core.Diagnostics;
 using BallisticPenetration.Core.Physics;
 
 namespace BallisticPenetration.Validation
@@ -134,6 +135,9 @@ namespace BallisticPenetration.Validation
             Run(
                 "Physical collision observed/resolved correlation and deduplication",
                 ValidatePhysicalCollisionObservedResolvedCorrelation);
+            Run(
+                "Bounded physical lifecycle terminal diagnostics",
+                ValidatePhysicalLifecycleTerminalDiagnostics);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical child seeds stay inside the host random table", ValidatePhysicalHostRandomSeed);
@@ -1068,6 +1072,237 @@ namespace BallisticPenetration.Validation
                     expectedCollisionId,
                     "resolved",
                     resolvedCollision.Sequence));
+        }
+
+        private static void ValidatePhysicalLifecycleTerminalDiagnostics()
+        {
+            var tracker = new PhysicalProjectileLifecycleTracker();
+            PhysicalLifecycleSnapshot stopped = CreateLifecycleSnapshot("stopped-projectile", 1d);
+            AssertTrue(
+                "canonical created projectile enters active lifecycle tracking",
+                tracker.TryRegister(stopped));
+            PhysicalLifecycleTerminalAttempt stoppedTerminal = tracker.TryTerminate(
+                stopped.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Stopped,
+                2d);
+            AssertTrue(
+                "created projectile ends once as stopped",
+                stoppedTerminal.Disposition == PhysicalLifecycleTerminalDisposition.Canonical
+                    && stoppedTerminal.Tombstone?.TerminalReason
+                        == PhysicalLifecycleTerminalReason.Stopped
+                    && tracker.ActiveCount == 0);
+
+            PhysicalLifecycleTerminalAttempt duplicateStopped = tracker.TryTerminate(
+                stopped.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Stopped,
+                3d);
+            AssertEqual(
+                "duplicate stopped-terminal attempt is detected",
+                PhysicalLifecycleTerminalDisposition.Duplicate,
+                duplicateStopped.Disposition);
+            AssertTrue(
+                "terminal-duplicate retains first and duplicate timestamps",
+                duplicateStopped.Tombstone != null
+                    && Math.Abs(duplicateStopped.Tombstone.TerminalTimestamp - 2d) <= Tolerance);
+            AssertTrue(
+                "retained retired identity is not reopened as a fresh lifecycle",
+                !tracker.TryRegister(stopped));
+
+            PhysicalLifecycleSnapshot original = CreateLifecycleSnapshot("original-projectile", 4d);
+            AssertTrue("original replacement candidate is created", tracker.TryRegister(original));
+            PhysicalLifecycleTerminalAttempt replacedTerminal = tracker.TryTerminate(
+                original.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Replaced,
+                5d);
+            AssertTrue(
+                "original projectile ends once as replaced",
+                replacedTerminal.Disposition == PhysicalLifecycleTerminalDisposition.Canonical
+                    && replacedTerminal.Tombstone?.TerminalReason
+                        == PhysicalLifecycleTerminalReason.Replaced);
+
+            PhysicalLifecycleSnapshot replacement = CreateLifecycleSnapshot(
+                "replacement-projectile",
+                6d);
+            AssertTrue(
+                "replacement receives a distinct physical projectile identity",
+                !string.Equals(
+                    original.ProjectileIdentity,
+                    replacement.ProjectileIdentity,
+                    StringComparison.Ordinal));
+            AssertTrue(
+                "replacement starts an independent active lifecycle",
+                tracker.TryRegister(replacement));
+            PhysicalLifecycleTerminalAttempt replacementTerminal = tracker.TryTerminate(
+                replacement.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Stopped,
+                7d);
+            AssertEqual(
+                "replacement later receives its own terminal event",
+                PhysicalLifecycleTerminalDisposition.Canonical,
+                replacementTerminal.Disposition);
+
+            PhysicalLifecycleSnapshot aborted = CreateLifecycleSnapshot("aborted-projectile", 8d);
+            AssertTrue("transaction candidate is created", tracker.TryRegister(aborted));
+            PhysicalLifecycleTerminalAttempt abortTerminal = tracker.TryTerminate(
+                aborted.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Aborted,
+                9d);
+            AssertTrue(
+                "transaction-abort receives aborted termination",
+                abortTerminal.Disposition == PhysicalLifecycleTerminalDisposition.Canonical
+                    && abortTerminal.Tombstone?.TerminalReason
+                        == PhysicalLifecycleTerminalReason.Aborted);
+
+            PhysicalLifecycleTerminalAttempt duplicateReplacement = tracker.TryTerminate(
+                original.ProjectileIdentity,
+                PhysicalLifecycleTerminalReason.Replaced,
+                10d);
+            AssertEqual(
+                "duplicate replacement-terminal attempt is detected",
+                PhysicalLifecycleTerminalDisposition.Duplicate,
+                duplicateReplacement.Disposition);
+            int ordinaryReplacementRetirements =
+                replacedTerminal.Disposition == PhysicalLifecycleTerminalDisposition.Canonical ? 1 : 0;
+            ordinaryReplacementRetirements +=
+                duplicateReplacement.Disposition == PhysicalLifecycleTerminalDisposition.Canonical ? 1 : 0;
+            AssertEqual(
+                "second ordinary replacement retirement record is suppressed",
+                1,
+                ordinaryReplacementRetirements);
+            AssertTrue(
+                "duplicate terminal disposition emits terminal-duplicate path",
+                duplicateReplacement.Disposition == PhysicalLifecycleTerminalDisposition.Duplicate
+                    && tracker.DuplicateTerminalViolationCount == 2);
+
+            PhysicalLifecycleSnapshot missingSnapshot = CreateLifecycleSnapshot(
+                "missing-projectile",
+                11d);
+            AssertTrue("missing-terminal candidate is created", tracker.TryRegister(missingSnapshot));
+            PhysicalLifecycleMissingTerminal? missing = tracker.RemoveWithoutTerminal(
+                missingSnapshot.ProjectileIdentity,
+                "binding-incarnation-mismatch",
+                12d);
+            AssertTrue(
+                "removal without terminal emits terminal-missing path",
+                missing != null
+                    && missing.RemovalReason == "binding-incarnation-mismatch"
+                    && tracker.MissingTerminalViolationCount == 1);
+            AssertTrue(
+                "missing terminal does not masquerade as a normal terminal reason",
+                missing != null
+                    && missing.Tombstone.MarksMissingTerminal
+                    && !missing.Tombstone.TerminalReason.HasValue);
+
+            var shutdownTracker = new PhysicalProjectileLifecycleTracker();
+            PhysicalLifecycleSnapshot shutdownFirst = CreateLifecycleSnapshot("shutdown-first", 13d);
+            PhysicalLifecycleSnapshot shutdownSecond = CreateLifecycleSnapshot("shutdown-second", 14d);
+            AssertTrue("first shutdown candidate is created", shutdownTracker.TryRegister(shutdownFirst));
+            AssertTrue("second shutdown candidate is created", shutdownTracker.TryRegister(shutdownSecond));
+            IReadOnlyList<PhysicalLifecycleSnapshot> shutdownClosed =
+                shutdownTracker.CloseActiveForShutdown(15d);
+            AssertTrue(
+                "expected shutdown produces cleanup instead of terminal-missing",
+                shutdownClosed.Count == 2
+                    && shutdownTracker.MissingTerminalViolationCount == 0
+                    && shutdownTracker.TryTerminate(
+                        shutdownFirst.ProjectileIdentity,
+                        PhysicalLifecycleTerminalReason.Stopped,
+                        16d).Tombstone?.TerminalReason == PhysicalLifecycleTerminalReason.Shutdown);
+            AssertEqual(
+                "shutdown closes every active lifecycle tracker",
+                0,
+                shutdownTracker.ActiveCount);
+            shutdownTracker.Clear();
+            AssertTrue(
+                "expected shutdown final clear removes tombstones and violation counters",
+                shutdownTracker.ActiveCount == 0
+                    && shutdownTracker.TombstoneCount == 0
+                    && shutdownTracker.DuplicateTerminalViolationCount == 0
+                    && shutdownTracker.MissingTerminalViolationCount == 0);
+
+            var visualTracker = new PhysicalProjectileLifecycleTracker();
+            PhysicalLifecycleSnapshot visual = CreateLifecycleSnapshot("visual-projectile", 17d);
+            AssertTrue("visual lifecycle candidate is created", visualTracker.TryRegister(visual));
+            AssertTrue(
+                "visual retirement observation does not satisfy physical lifecycle termination",
+                visualTracker.TryObserve(
+                    visual.ProjectileIdentity,
+                    new PhysicalVector3(1d, 2d, 3d),
+                    new PhysicalVector3(4d, 5d, 6d),
+                    null,
+                    null)
+                    && visualTracker.IsActive(visual.ProjectileIdentity)
+                    && visualTracker.TombstoneCount == 0);
+
+            AssertEqual(
+                "fixed production tombstone capacity",
+                1024,
+                PhysicalProjectileLifecycleTracker.DefaultTerminalTombstoneCapacity);
+            var bounded = new PhysicalProjectileLifecycleTracker(3);
+            for (int index = 1; index <= 4; index++)
+            {
+                PhysicalLifecycleSnapshot snapshot = CreateLifecycleSnapshot(
+                    "bounded-" + index.ToString(CultureInfo.InvariantCulture),
+                    20d + index);
+                AssertTrue(
+                    "bounded tombstone projectile created " + index,
+                    bounded.TryRegister(snapshot));
+                AssertEqual(
+                    "bounded tombstone projectile terminated " + index,
+                    PhysicalLifecycleTerminalDisposition.Canonical,
+                    bounded.TryTerminate(
+                        snapshot.ProjectileIdentity,
+                        PhysicalLifecycleTerminalReason.Stopped,
+                        30d + index).Disposition);
+            }
+
+            AssertEqual("tombstone collection remains at fixed capacity", 3, bounded.TombstoneCount);
+            AssertTrue(
+                "tombstone eviction is deterministic oldest-first",
+                !bounded.ContainsTombstone("bounded-1")
+                    && bounded.ContainsTombstone("bounded-2")
+                    && bounded.ContainsTombstone("bounded-3")
+                    && bounded.ContainsTombstone("bounded-4"));
+            AssertEqual(
+                "delayed duplicate inside retained capacity is detected",
+                PhysicalLifecycleTerminalDisposition.Duplicate,
+                bounded.TryTerminate(
+                    "bounded-2",
+                    PhysicalLifecycleTerminalReason.Stopped,
+                    40d).Disposition);
+            AssertTrue(
+                "evicted identity does not corrupt newer tombstones",
+                bounded.ContainsTombstone("bounded-3")
+                    && bounded.ContainsTombstone("bounded-4"));
+
+            var correlation = new PhysicalCollisionObservedResolvedTracker();
+            AssertTrue(
+                "collision-observed correlation remains emitted once",
+                correlation.TryEmit("correlated", "collision-1", "observed", 1));
+            AssertTrue(
+                "collision-resolved correlation remains independently emitted once",
+                correlation.TryEmit("correlated", "collision-1", "resolved", 1));
+            AssertTrue(
+                "collision phase deduplication from 611e8a7 remains preserved",
+                !correlation.TryEmit("correlated", "collision-1", "observed", 1)
+                    && !correlation.TryEmit("correlated", "collision-1", "resolved", 1));
+        }
+
+        private static PhysicalLifecycleSnapshot CreateLifecycleSnapshot(
+            string projectileIdentity,
+            double creationTimestamp)
+        {
+            return new PhysicalLifecycleSnapshot(
+                projectileIdentity,
+                "root-" + projectileIdentity,
+                PhysicalProjectileKind.IntactProjectile.ToString(),
+                0,
+                0,
+                creationTimestamp,
+                new PhysicalVector3(1d, 2d, 3d),
+                new PhysicalVector3(400d, 0d, 0d),
+                string.Empty,
+                0);
         }
 
         private static void ValidatePhysicalVisualGeometry()

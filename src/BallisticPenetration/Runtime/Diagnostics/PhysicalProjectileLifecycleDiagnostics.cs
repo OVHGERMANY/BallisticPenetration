@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
+using BallisticPenetration.Core.Diagnostics;
 using BallisticPenetration.Core.Physics;
 using BallisticPenetration.Runtime.State;
 using EFT.Ballistics;
@@ -14,11 +15,18 @@ namespace BallisticPenetration.Runtime.Diagnostics
     internal static class PhysicalProjectileLifecycleDiagnostics
     {
         private const int MaximumRecordsPerProcess = 8192;
+        internal const int TerminalTombstoneCapacity =
+            PhysicalProjectileLifecycleTracker.DefaultTerminalTombstoneCapacity;
+
+        private static readonly object LifecycleLock = new object();
+        private static readonly PhysicalProjectileLifecycleTracker LifecycleTracker =
+            new PhysicalProjectileLifecycleTracker(TerminalTombstoneCapacity);
+        private static readonly object CollisionLogLock = new object();
+        private static readonly Dictionary<string, HashSet<(string CollisionIdentity, string Phase)>> CollisionLogByProjectile
+            = new Dictionary<string, HashSet<(string, string)>>(StringComparer.Ordinal);
         private static int _recordCount;
         private static int _limitReported;
-        private static readonly object _collisionLogLock = new object();
-        private static readonly Dictionary<string, HashSet<(string CollisionIdentity, string Phase)>> _collisionLogByProjectile
-            = new Dictionary<string, HashSet<(string, string)>>(StringComparer.Ordinal);
+        private static bool _shutdownStarted;
 
         internal static void Record(
             string eventName,
@@ -101,6 +109,104 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 collisionRecord);
         }
 
+        internal static void RecordRemoval(
+            Shot? shot,
+            PhysicalShotBinding? binding,
+            string removalReason)
+        {
+            if (binding == null)
+            {
+                return;
+            }
+
+            try
+            {
+                double now = Time.realtimeSinceStartupAsDouble;
+                string projectileIdentity = binding.State.ProjectileId;
+                PhysicalLifecycleMissingTerminal? missing;
+                lock (LifecycleLock)
+                {
+                    if (_shutdownStarted)
+                    {
+                        return;
+                    }
+
+                    ObserveIfCurrent(shot, binding, null, null);
+                    missing = LifecycleTracker.RemoveWithoutTerminal(
+                        projectileIdentity,
+                        removalReason,
+                        now);
+                }
+
+                if (missing == null)
+                {
+                    return;
+                }
+
+                ClearCollisionDedupeState(projectileIdentity);
+                LogMissingTerminal(missing, now);
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogHookFailure("Physical projectile lifecycle removal diagnostics", exception);
+            }
+        }
+
+        internal static void ShutdownExpected()
+        {
+            IReadOnlyList<PhysicalLifecycleSnapshot> closed;
+            int tombstonesBeforeFinalCleanup;
+            int duplicateTerminalViolations;
+            int missingTerminalViolations;
+            double now = Time.realtimeSinceStartupAsDouble;
+
+            lock (LifecycleLock)
+            {
+                if (_shutdownStarted)
+                {
+                    return;
+                }
+
+                _shutdownStarted = true;
+                closed = LifecycleTracker.CloseActiveForShutdown(now);
+                tombstonesBeforeFinalCleanup = LifecycleTracker.TombstoneCount;
+                duplicateTerminalViolations = LifecycleTracker.DuplicateTerminalViolationCount;
+                missingTerminalViolations = LifecycleTracker.MissingTerminalViolationCount;
+            }
+
+            try
+            {
+                for (int index = 0; index < closed.Count; index++)
+                {
+                    LogShutdownTerminal(closed[index], now);
+                }
+
+                Plugin.Log?.LogInfo(
+                    "Physical projectile lifecycle: event=shutdown-cleanup-summary"
+                    + ", activeEntriesClosed=" + closed.Count
+                    + ", tombstonesBeforeFinalCleanup=" + tombstonesBeforeFinalCleanup
+                    + ", duplicateTerminalViolations=" + duplicateTerminalViolations
+                    + ", missingTerminalViolations=" + missingTerminalViolations
+                    + ".");
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogHookFailure("Physical projectile lifecycle shutdown diagnostics", exception);
+            }
+            finally
+            {
+                lock (LifecycleLock)
+                {
+                    LifecycleTracker.Clear();
+                }
+
+                lock (CollisionLogLock)
+                {
+                    CollisionLogByProjectile.Clear();
+                }
+            }
+        }
+
         private static void RecordInternal(
             string eventName,
             Shot? shot,
@@ -120,43 +226,128 @@ namespace BallisticPenetration.Runtime.Diagnostics
             PhysicalCollisionRecord? collisionRecord)
         {
             PluginConfiguration? configuration = Plugin.Configuration;
-            if (configuration == null
-                || !configuration.LogPhysicalProjectileLifecycle.Value
-                || binding == null)
+            if (binding == null)
             {
                 return;
             }
 
-            if ((eventName == "collision-observed" || eventName == "collision-resolved")
-                && IsDuplicateCollisionEvent(
-                    binding.State.ProjectileId,
-                    collisionIdentity,
-                    phase))
+            bool loggingEnabled = configuration != null
+                && configuration.LogPhysicalProjectileLifecycle.Value;
+            if (eventName == "created" && !loggingEnabled)
             {
-                return;
-            }
-
-            int recordNumber = Interlocked.Increment(ref _recordCount);
-            if (recordNumber > MaximumRecordsPerProcess)
-            {
-                if (Interlocked.CompareExchange(ref _limitReported, 1, 0) == 0)
-                {
-                    Plugin.Log?.LogWarning(
-                        "Physical projectile lifecycle log reached its 8192-record process limit.");
-                }
-
                 return;
             }
 
             try
             {
                 PhysicalProjectileState state = binding.State;
-                if (eventName == "retired"
-                    && (reason == "terminal-stop"
-                        || reason == "collision-replaced"
-                        || reason == "transaction-abort"))
+                double now = Time.realtimeSinceStartupAsDouble;
+                bool isCanonicalTerminal = TryResolveCanonicalTerminalReason(
+                    eventName,
+                    reason,
+                    out PhysicalLifecycleTerminalReason attemptedTerminalReason);
+                PhysicalLifecycleTerminalAttempt? terminalAttempt = null;
+                bool creationRegistered = true;
+
+                lock (LifecycleLock)
+                {
+                    if (_shutdownStarted)
+                    {
+                        return;
+                    }
+
+                    if (eventName == "created")
+                    {
+                        creationRegistered = LifecycleTracker.TryRegister(
+                            CreateSnapshot(shot, binding));
+                    }
+                    else
+                    {
+                        ObserveIfCurrent(
+                            shot,
+                            binding,
+                            collisionIdentity,
+                            recordSequence.HasValue
+                                ? ResolveCollisionOrdinal(recordSequence.Value)
+                                : null);
+                    }
+
+                    if (isCanonicalTerminal)
+                    {
+                        terminalAttempt = LifecycleTracker.TryTerminate(
+                            state.ProjectileId,
+                            attemptedTerminalReason,
+                            now);
+                    }
+                    else if ((eventName == "collision-observed"
+                            || eventName == "collision-resolved")
+                        && !LifecycleTracker.IsActive(state.ProjectileId))
+                    {
+                        return;
+                    }
+                }
+
+                if (!creationRegistered)
+                {
+                    Plugin.Log?.LogWarning(
+                        "Physical projectile lifecycle invariant: event=lifecycle-identity-reused"
+                        + ", projectile=" + state.ProjectileId
+                        + ", root=" + state.RootShotId
+                        + ", kind=" + state.Kind
+                        + ", fragmentIndex=" + state.FragmentIndex
+                        + ", fragmentGeneration=" + state.FragmentGeneration
+                        + ", timestamp=" + Format(now)
+                        + ".");
+                    return;
+                }
+
+                if (terminalAttempt?.Disposition == PhysicalLifecycleTerminalDisposition.Duplicate)
+                {
+                    LogDuplicateTerminal(
+                        terminalAttempt.Tombstone,
+                        attemptedTerminalReason,
+                        now);
+                    return;
+                }
+
+                if (isCanonicalTerminal
+                    && terminalAttempt?.Disposition != PhysicalLifecycleTerminalDisposition.Canonical)
+                {
+                    return;
+                }
+
+                if (isCanonicalTerminal)
                 {
                     ClearCollisionDedupeState(state.ProjectileId);
+                }
+
+                if (!loggingEnabled)
+                {
+                    return;
+                }
+
+                if ((eventName == "collision-observed" || eventName == "collision-resolved")
+                    && IsDuplicateCollisionEvent(
+                        state.ProjectileId,
+                        collisionIdentity,
+                        phase))
+                {
+                    return;
+                }
+
+                if (!isCanonicalTerminal)
+                {
+                    int recordNumber = Interlocked.Increment(ref _recordCount);
+                    if (recordNumber > MaximumRecordsPerProcess)
+                    {
+                        if (Interlocked.CompareExchange(ref _limitReported, 1, 0) == 0)
+                        {
+                            Plugin.Log?.LogWarning(
+                                "Physical projectile lifecycle log reached its 8192-record process limit.");
+                        }
+
+                        return;
+                    }
                 }
 
                 int resolvedSequence = recordSequence ?? state.CollisionHistory.Count;
@@ -166,7 +357,6 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 bool isReplaced = replaced ?? false;
                 Vector3 currentPosition = shot != null ? shot.CurrentPosition : binding.CreationPosition;
                 Vector3 currentVelocity = shot != null ? shot.CurrentVelocity : Vector3.zero;
-                double now = Time.realtimeSinceStartupAsDouble;
                 bool ballisticTerminal = ResolveBallisticTerminalState(
                     eventName,
                     reason,
@@ -239,6 +429,80 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        private static PhysicalLifecycleSnapshot CreateSnapshot(
+            Shot? shot,
+            PhysicalShotBinding binding)
+        {
+            Vector3 position = shot != null ? shot.CurrentPosition : binding.CreationPosition;
+            Vector3 velocity = shot != null ? shot.CurrentVelocity : binding.CreationVelocity;
+            PhysicalProjectileState state = binding.State;
+            PhysicalCollisionRecord? lastCollision = state.CollisionHistory.Count > 0
+                ? state.CollisionHistory[state.CollisionHistory.Count - 1]
+                : null;
+            return new PhysicalLifecycleSnapshot(
+                state.ProjectileId,
+                state.RootShotId,
+                state.Kind.ToString(),
+                state.FragmentIndex,
+                state.FragmentGeneration,
+                binding.CreationTimeSeconds,
+                ToPhysical(position),
+                ToPhysical(velocity),
+                lastCollision?.CollisionId ?? string.Empty,
+                lastCollision?.Sequence ?? 0);
+        }
+
+        private static void ObserveIfCurrent(
+            Shot? shot,
+            PhysicalShotBinding binding,
+            string? collisionIdentity,
+            int? collisionOrdinal)
+        {
+            if (shot == null || !binding.Matches(shot))
+            {
+                return;
+            }
+
+            LifecycleTracker.TryObserve(
+                binding.State.ProjectileId,
+                ToPhysical(shot.CurrentPosition),
+                ToPhysical(shot.CurrentVelocity),
+                collisionIdentity,
+                collisionOrdinal);
+        }
+
+        private static bool TryResolveCanonicalTerminalReason(
+            string eventName,
+            string reason,
+            out PhysicalLifecycleTerminalReason terminalReason)
+        {
+            terminalReason = PhysicalLifecycleTerminalReason.Stopped;
+            if (eventName != "retired")
+            {
+                return false;
+            }
+
+            if (reason == "terminal-stop")
+            {
+                terminalReason = PhysicalLifecycleTerminalReason.Stopped;
+                return true;
+            }
+
+            if (reason == "collision-replaced")
+            {
+                terminalReason = PhysicalLifecycleTerminalReason.Replaced;
+                return true;
+            }
+
+            if (reason == "transaction-abort")
+            {
+                terminalReason = PhysicalLifecycleTerminalReason.Aborted;
+                return true;
+            }
+
+            return false;
+        }
+
         private static bool ResolveBallisticTerminalState(
             string eventName,
             string reason,
@@ -262,15 +526,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 return terminalOverride.Value;
             }
 
-            if (eventName == "retired"
+            return eventName == "retired"
                 && (reason == "terminal-stop"
                     || reason == "collision-replaced"
-                    || reason == "transaction-abort"))
-            {
-                return true;
-            }
-
-            return false;
+                    || reason == "transaction-abort");
         }
 
         private static string ResolveLifecycleEndReason(
@@ -301,7 +560,6 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     return "aborted";
                 }
 
-                // Preserve prior terminal state semantics for unexpected retired states only.
                 if (terminalState == PhysicalProjectileTerminalState.Stopped)
                 {
                     return "stopped";
@@ -323,15 +581,15 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 return false;
             }
 
-            lock (_collisionLogLock)
+            lock (CollisionLogLock)
             {
-                if (!_collisionLogByProjectile.TryGetValue(
+                if (!CollisionLogByProjectile.TryGetValue(
                         projectileIdentity,
                         out HashSet<(string CollisionIdentity, string Phase)>? recordedPhases))
                 {
                     recordedPhases = new HashSet<(string CollisionIdentity, string Phase)>(
                         CollisionRecordTupleComparer.Instance);
-                    _collisionLogByProjectile[projectileIdentity] = recordedPhases;
+                    CollisionLogByProjectile[projectileIdentity] = recordedPhases;
                 }
 
                 return !recordedPhases.Add((collisionIdentity, phase));
@@ -345,15 +603,109 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 return;
             }
 
-            lock (_collisionLogLock)
+            lock (CollisionLogLock)
             {
-                _collisionLogByProjectile.Remove(projectileIdentity);
+                CollisionLogByProjectile.Remove(projectileIdentity);
             }
         }
 
-        private static int ResolveCollisionOrdinal(int? recordSequence)
+        private static void LogDuplicateTerminal(
+            PhysicalLifecycleTombstone? firstTerminal,
+            PhysicalLifecycleTerminalReason attemptedReason,
+            double duplicateTimestamp)
         {
-            return recordSequence ?? 0;
+            if (firstTerminal == null)
+            {
+                return;
+            }
+
+            PhysicalLifecycleSnapshot snapshot = firstTerminal.Snapshot;
+            Plugin.Log?.LogWarning(
+                "Physical projectile lifecycle invariant: event=terminal-duplicate"
+                + ", projectile=" + snapshot.ProjectileIdentity
+                + ", root=" + snapshot.RootIdentity
+                + ", kind=" + snapshot.ProjectileKind
+                + ", fragmentIndex=" + snapshot.FragmentIndex
+                + ", fragmentGeneration=" + snapshot.FragmentGeneration
+                + ", firstTerminalReason=" + FormatTerminalReason(firstTerminal)
+                + ", attemptedTerminalReason=" + FormatTerminalReason(attemptedReason)
+                + ", firstTerminalTimestamp=" + Format(firstTerminal.TerminalTimestamp)
+                + ", duplicateTimestamp=" + Format(duplicateTimestamp)
+                + ".");
+        }
+
+        private static void LogMissingTerminal(
+            PhysicalLifecycleMissingTerminal missing,
+            double removalTimestamp)
+        {
+            PhysicalLifecycleSnapshot snapshot = missing.Snapshot;
+            Plugin.Log?.LogWarning(
+                "Physical projectile lifecycle invariant: event=terminal-missing"
+                + ", projectile=" + snapshot.ProjectileIdentity
+                + ", root=" + snapshot.RootIdentity
+                + ", kind=" + snapshot.ProjectileKind
+                + ", fragmentIndex=" + snapshot.FragmentIndex
+                + ", fragmentGeneration=" + snapshot.FragmentGeneration
+                + ", removalPath=" + missing.RemovalReason
+                + ", createdAt=" + Format(snapshot.CreationTimestamp)
+                + ", lastPosition=" + Format(snapshot.LastKnownPosition)
+                + ", lastVelocity=" + Format(snapshot.LastKnownVelocity)
+                + ", lastSpeed=" + Format(snapshot.LastKnownSpeed)
+                + ", lastCollisionIdentity=" + FormatOptional(snapshot.LastCollisionIdentity)
+                + ", lastCollisionOrdinal=" + snapshot.LastCollisionOrdinal
+                + ", removalTimestamp=" + Format(removalTimestamp)
+                + ".");
+        }
+
+        private static void LogShutdownTerminal(
+            PhysicalLifecycleSnapshot snapshot,
+            double shutdownTimestamp)
+        {
+            Plugin.Log?.LogInfo(
+                "Physical projectile lifecycle: event=retired"
+                + ", projectile=" + snapshot.ProjectileIdentity
+                + ", root=" + snapshot.RootIdentity
+                + ", kind=" + snapshot.ProjectileKind
+                + ", fragmentIndex=" + snapshot.FragmentIndex
+                + ", fragmentGeneration=" + snapshot.FragmentGeneration
+                + ", createdAt=" + Format(snapshot.CreationTimestamp)
+                + ", age=" + Format(Math.Max(0d, shutdownTimestamp - snapshot.CreationTimestamp))
+                + ", currentPosition=" + Format(snapshot.LastKnownPosition)
+                + ", lastVelocity=" + Format(snapshot.LastKnownVelocity)
+                + ", lastSpeed=" + Format(snapshot.LastKnownSpeed)
+                + ", lastCollisionIdentity=" + FormatOptional(snapshot.LastCollisionIdentity)
+                + ", lastCollisionOrdinal=" + snapshot.LastCollisionOrdinal
+                + ", ballisticTerminal=false"
+                + ", lifecycleTerminal=true"
+                + ", lifecycleEndReason=shutdown"
+                + ", reason=shutdown-cleanup.");
+        }
+
+        private static string FormatTerminalReason(PhysicalLifecycleTombstone tombstone)
+        {
+            return tombstone.TerminalReason.HasValue
+                ? FormatTerminalReason(tombstone.TerminalReason.Value)
+                : "missing";
+        }
+
+        private static string FormatTerminalReason(PhysicalLifecycleTerminalReason terminalReason)
+        {
+            return terminalReason.ToString().ToLowerInvariant();
+        }
+
+        private static string FormatOptional(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "none" : value;
+        }
+
+        private static int ResolveCollisionOrdinal(int recordSequence)
+        {
+            return recordSequence;
+        }
+
+        private static PhysicalVector3 ToPhysical(Vector3 value)
+        {
+            return new PhysicalVector3(value.x, value.y, value.z);
         }
 
         private static string Format(Vector3 value)

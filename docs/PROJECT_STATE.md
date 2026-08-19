@@ -6,10 +6,12 @@
 
 ## Runtime Branch / Commit
 - Branch: `development/physical-projectile-system`
-- HEAD: `49800c9`
+- Milestone base HEAD: `611e8a7`
+- Checkpoint: `Add bounded terminal lifecycle diagnostics`
 
 ## Active Objective
-- Diagnostics-only per-collision observed/resolved correlation and deduplication, with stopped resolved lifecycle-semantics fixed.
+- Bounded physical lifecycle-terminal invariant diagnostics, including duplicate-terminal,
+  missing-terminal, and expected-shutdown cleanup records.
 - Gameplay physics must remain unchanged.
 
 ## Fixed Constraints
@@ -21,11 +23,13 @@
 - A projectile can cross multiple layers at the same recorded velocity while penetration and damage compound (diagnostics investigation target).
 
 ## Files Currently Involved
-- BallisticPenetration diagnostics runtime and validation files selected by the lifecycle diagnostics scope.
+- `src/BallisticPenetration/Core/Diagnostics/PhysicalProjectileLifecycleTracker.cs`
+- `src/BallisticPenetration/Runtime/Diagnostics/PhysicalProjectileLifecycleDiagnostics.cs`
+- `src/BallisticPenetration/Runtime/State/PhysicalShotBinding.cs`
+- `src/BallisticPenetration/Runtime/Plugin.cs`
+- `tests/BallisticPenetration.Validation/Program.cs`
 - `docs/PROJECT_STATE.md`
 - `docs/exec-plans/active/lifecycle-diagnostics.md`
-- `docs/DECISIONS.md`
-- `AGENTS.md`
 
 ## Latest Completed Work
 - Baseline gameplay logic freeze established.
@@ -37,14 +41,29 @@
   - `collision-observed` and `collision-resolved` share stable `collisionIdentity` and per-payload dedupe.
   - Stopped outcomes emit resolved lifecycle exactly once with `continued=false` and `replaced=false`.
   - Stopped resolved lifecycle now correctly reports `lifecycleTerminal=false`.
+- Added an active-only physical lifecycle tracker and a fixed-capacity terminal tombstone
+  tracker with deterministic oldest-first eviction.
+- Terminal tombstone capacity is `1024`.
+- Canonical `stopped`, `replaced`, and `aborted` retirement removes the active identity,
+  records one tombstone, and suppresses later ordinary retirement records for that identity.
+- A repeated terminal attempt inside retained capacity emits `event=terminal-duplicate`
+  with first and attempted reasons and timestamps.
+- Physical binding removal without a canonical terminal emits `event=terminal-missing`,
+  closes the active diagnostics entry, and records a missing-terminal tombstone without
+  assigning a normal lifecycle end reason.
+- Expected plugin destruction emits one `shutdown-cleanup` retirement per active identity,
+  then `event=shutdown-cleanup-summary`, then clears active lifecycle state, collision
+  dedupe state, tombstones, and violation counters.
+- Replacement identities remain independent; a retired retained identity cannot be
+  registered again as a fresh lifecycle.
 - Validation passpoint checkpoint:
   - `dotnet build ... -c Release -p:SptRoot="E:\\Games\\SPT" -p:TreatWarningsAsErrors=true` succeeded (0 warnings, 0 errors).
-  - `dotnet run --project ...BallisticPenetration.Validation...` completed with `47 passed, 0 failed`.
+  - `dotnet run --project ...BallisticPenetration.Validation...` completed with `48 passed, 0 failed`.
 - Gameplay behavior unchanged; diagnostics-only modifications.
 
 ## Latest Build and Validation
 - BallisticPenetration build: succeeded with 0 warnings and 0 errors.
-- BallisticPenetration validation: `47 passed, 0 failed`.
+- BallisticPenetration validation: `48 passed, 0 failed`.
 - No gameplay kinematic/impact branches changed in this step.
 
 ## Deployment Paths and Hashes
@@ -62,4 +81,6 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Next milestone: terminal-missing and terminal-duplicate detection, duplicate-terminal guard, and explicit lifecycle retirement markers.
+- Lifecycle diagnostics milestone is complete.
+- Next incomplete project milestone: diagnose the known multilayer velocity defect under a
+  separately authorized physics task; no multilayer fix was started here.

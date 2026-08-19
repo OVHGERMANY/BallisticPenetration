@@ -103,6 +103,7 @@ namespace BallisticPenetration
         private void OnDestroy()
         {
             _isShuttingDown = true;
+            PhysicalProjectileLifecycleDiagnostics.ShutdownExpected();
             PhysicalProjectileVisualRuntime.Shutdown();
             // Remove the optional overlay and trace objects.
             DiagnosticsRuntime.Shutdown();

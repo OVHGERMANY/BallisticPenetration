@@ -3,6 +3,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using BallisticPenetration.Core.Physics;
+using BallisticPenetration.Runtime.Diagnostics;
 using EFT.Ballistics;
 using EFT.InventoryLogic;
 using UnityEngine;
@@ -165,10 +166,20 @@ namespace BallisticPenetration.Runtime.State
                 throw new InvalidOperationException("Physical shot binding does not match the current shot incarnation.");
             }
 
+            PhysicalShotBinding? displaced = null;
             lock (Gate)
             {
+                Bindings.TryGetValue(shot, out displaced);
                 Bindings.Remove(shot);
                 Bindings.Add(shot, binding);
+            }
+
+            if (displaced != null)
+            {
+                PhysicalProjectileLifecycleDiagnostics.RecordRemoval(
+                    shot,
+                    displaced,
+                    "binding-overwritten");
             }
 
             return binding;
@@ -182,6 +193,7 @@ namespace BallisticPenetration.Runtime.State
                 return false;
             }
 
+            PhysicalShotBinding? removed = null;
             lock (Gate)
             {
                 if (!Bindings.TryGetValue(shot, out PhysicalShotBinding stored))
@@ -192,12 +204,24 @@ namespace BallisticPenetration.Runtime.State
                 if (!stored.Matches(shot))
                 {
                     Bindings.Remove(shot);
-                    return false;
+                    removed = stored;
                 }
-
-                binding = stored;
-                return true;
+                else
+                {
+                    binding = stored;
+                }
             }
+
+            if (removed != null)
+            {
+                PhysicalProjectileLifecycleDiagnostics.RecordRemoval(
+                    shot,
+                    removed,
+                    "binding-incarnation-mismatch");
+                return false;
+            }
+
+            return binding != null;
         }
 
         internal static void RemoveIfSame(Shot shot, PhysicalShotBinding expected)
@@ -207,13 +231,23 @@ namespace BallisticPenetration.Runtime.State
                 return;
             }
 
+            bool removed = false;
             lock (Gate)
             {
                 if (Bindings.TryGetValue(shot, out PhysicalShotBinding current)
                     && ReferenceEquals(current, expected))
                 {
                     Bindings.Remove(shot);
+                    removed = true;
                 }
+            }
+
+            if (removed)
+            {
+                PhysicalProjectileLifecycleDiagnostics.RecordRemoval(
+                    shot,
+                    expected,
+                    "binding-remove-if-same");
             }
         }
     }
