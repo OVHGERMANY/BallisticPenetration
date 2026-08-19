@@ -81,6 +81,23 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Lifecycle diagnostics milestone is complete.
-- Next incomplete project milestone: diagnose the known multilayer velocity defect under a
-  separately authorized physics task; no multilayer fix was started here.
+- Combined in-game acceptance testing is the next action after this verified deployment.
+
+## Verified Lifecycle Diagnostics Deployment
+- Deployment date/time: 2026-08-19 09:07:26 CDT.
+- Deployed source commit: `2b69e785f05ff21340453776be33b97e426561dd`.
+- Release DLL source: `C:\Users\jbnel\Projects\BallisticPenetration\src\BallisticPenetration\bin\Release\netstandard2.1\BallisticPenetration.dll`.
+- Installed DLL destination: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`.
+- Prior installed SHA-256: `43D17BF2B509FC731CF8745B7FF0CD1E32C7E8C983CE68C689B0147191256F90`.
+- Prior installed length: `233984` bytes.
+- Backup: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\backup\BallisticPenetration.dll.20260819-090726-pre-lifecycle.bak`.
+- Release SHA-256: `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`.
+- Installed SHA-256: `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`.
+- Release and installed lengths: `254976` bytes each; hashes and lengths match.
+- Build: Release succeeded with 0 warnings and 0 errors using `dotnet build C:\Users\jbnel\Projects\BallisticPenetration\BallisticPenetration.sln --configuration Release -p:SptRoot=E:\Games\SPT -p:TreatWarningsAsErrors=true`.
+- Validation: `48 passed, 0 failed`.
+- Diagnostics strings verified in the Release assembly: `collision-observed`, `collision-resolved`, `terminal-duplicate`, `terminal-missing`, `shutdown-cleanup`, `shutdown-cleanup-summary`, `lifecycleTerminal`, and `lifecycleEndReason`.
+- Runtime log: `E:\Games\SPT\BepInEx\LogOutput.log`.
+- HollywoodFX is already deployed and hash-verified separately.
+- The multilayer velocity defect remains unresolved; no physics changes are authorized yet.
+- Gameplay behavior changed: no.

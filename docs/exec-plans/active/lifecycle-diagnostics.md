@@ -62,3 +62,20 @@
 - [x] Added bounded duplicate-terminal and missing-terminal invariant reporting.
 - [x] Added expected-shutdown terminal cleanup and summary reporting before state clear.
 - [x] Added explicit validation assertions for all 18 required lifecycle behaviors.
+
+## Verified Deployment Checkpoint
+- Deployed source commit: `2b69e785f05ff21340453776be33b97e426561dd`.
+- Release DLL source: `C:\Users\jbnel\Projects\BallisticPenetration\src\BallisticPenetration\bin\Release\netstandard2.1\BallisticPenetration.dll`.
+- Installed DLL destination: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`.
+- Prior installed SHA-256/length: `43D17BF2B509FC731CF8745B7FF0CD1E32C7E8C983CE68C689B0147191256F90` / `233984` bytes.
+- Backup: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\backup\BallisticPenetration.dll.20260819-090726-pre-lifecycle.bak`.
+- Release SHA-256/length: `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249` / `254976` bytes.
+- Installed SHA-256/length: `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249` / `254976` bytes; hashes and lengths match.
+- Deployment date/time: 2026-08-19 09:07:26 CDT.
+- Build: Release succeeded with 0 warnings and 0 errors.
+- Validation: `48 passed, 0 failed`.
+- Diagnostics strings were verified in the Release assembly and the installed DLL is byte-identical to it.
+- Runtime log: `E:\Games\SPT\BepInEx\LogOutput.log`.
+- HollywoodFX is already deployed and hash-verified separately.
+- Next action: combined in-game acceptance testing. Do not launch the game in this session.
+- The multilayer velocity defect remains unresolved; no physics changes are authorized yet.
