@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace BallisticPenetration.Core
@@ -15,7 +17,7 @@ namespace BallisticPenetration.Core
         private static readonly Version SupportedCoreVersion =
             new Version(SupportedCoreVersionText);
 
-        internal static bool IsExactSupportedCoreVersion(Version actualVersion)
+        internal static bool IsExactSupportedCoreVersion(Version? actualVersion)
         {
             return actualVersion != null && actualVersion.Equals(SupportedCoreVersion);
         }

@@ -5,6 +5,8 @@
     <AssemblyName>BallisticPenetration.Validation</AssemblyName>
     <RootNamespace>BallisticPenetration.Validation</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Linked Core files form the production library's public API; CA1515 sees only this executable. -->
+    <NoWarn>$(NoWarn);CA1515</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

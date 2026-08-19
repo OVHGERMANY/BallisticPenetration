@@ -8,7 +8,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
     {
         private static readonly object Gate = new object();
         private static long _nextSequence;
-        private static AdjustmentDiagnosticRecord _latest;
+        private static AdjustmentDiagnosticRecord? _latest;
 
         internal static void Record(AdjustmentDiagnosticRecord record)
         {
@@ -19,7 +19,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord record)
+        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord? record)
         {
             lock (Gate)
             {

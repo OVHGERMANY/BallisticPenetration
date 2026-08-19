@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace BallisticPenetration.Core
@@ -25,7 +27,7 @@ namespace BallisticPenetration.Core
     /// Immutable exponents used to derive the penetration and damage falloff factors.
     /// Both exponents must be finite and greater than zero.
     /// </summary>
-    public readonly struct FalloffExponentConfiguration
+    public readonly struct FalloffExponentConfiguration : IEquatable<FalloffExponentConfiguration>
     {
         public const double DefaultPenetrationExponent = 1.4d;
         public const double DefaultDamageExponent = 0.4d;
@@ -82,12 +84,46 @@ namespace BallisticPenetration.Core
             failureReason = BallisticFalloffFailureReason.None;
             return true;
         }
+
+        public bool Equals(FalloffExponentConfiguration other)
+        {
+            return PenetrationExponent.Equals(other.PenetrationExponent)
+                && DamageExponent.Equals(other.DamageExponent);
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is FalloffExponentConfiguration other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (PenetrationExponent.GetHashCode() * 397)
+                    ^ DamageExponent.GetHashCode();
+            }
+        }
+
+        public static bool operator ==(
+            FalloffExponentConfiguration left,
+            FalloffExponentConfiguration right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(
+            FalloffExponentConfiguration left,
+            FalloffExponentConfiguration right)
+        {
+            return !left.Equals(right);
+        }
     }
 
     /// <summary>
     /// The raw impact/template speed ratio and its independently calculated stat factors.
     /// </summary>
-    public readonly struct BallisticFalloffFactors
+    public readonly struct BallisticFalloffFactors : IEquatable<BallisticFalloffFactors>
     {
         internal BallisticFalloffFactors(
             double speedFraction,
@@ -118,6 +154,43 @@ namespace BallisticPenetration.Core
             {
                 return new BallisticFalloffFactors(0d, 1d, 1d);
             }
+        }
+
+        public bool Equals(BallisticFalloffFactors other)
+        {
+            return SpeedFraction.Equals(other.SpeedFraction)
+                && PenetrationFactor.Equals(other.PenetrationFactor)
+                && DamageFactor.Equals(other.DamageFactor);
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is BallisticFalloffFactors other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = SpeedFraction.GetHashCode();
+                hash = (hash * 397) ^ PenetrationFactor.GetHashCode();
+                hash = (hash * 397) ^ DamageFactor.GetHashCode();
+                return hash;
+            }
+        }
+
+        public static bool operator ==(
+            BallisticFalloffFactors left,
+            BallisticFalloffFactors right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(
+            BallisticFalloffFactors left,
+            BallisticFalloffFactors right)
+        {
+            return !left.Equals(right);
         }
     }
 

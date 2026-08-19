@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using EFT.Ballistics;
 using UnityEngine;
 using BallisticPenetration.Core;
@@ -13,8 +14,12 @@ namespace BallisticPenetration.Runtime.Diagnostics
     internal static class DiagnosticsRuntime
     {
         private static readonly object HostGate = new object();
-        private static DiagnosticsOverlayBehaviour _host;
+        private static DiagnosticsOverlayBehaviour? _host;
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Diagnostic capture must fail open for arbitrary pooled EFT shot data failures.")]
         internal static void TryRecordAdjustment(
             Shot shot,
             CollisionContext context,
@@ -23,7 +28,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.EnableInGameDiagnostics.Value)
                 {
                     return;
@@ -43,7 +48,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
-        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord record)
+        internal static bool TryGetLatest(out AdjustmentDiagnosticRecord? record)
         {
             return DiagnosticsRecorder.TryGetLatest(out record);
         }
@@ -52,17 +57,21 @@ namespace BallisticPenetration.Runtime.Diagnostics
         /// Called exclusively from BaseUnityPlugin.Update on Unity's main thread.
         /// Collision hooks record data only and never create Unity objects.
         /// </summary>
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional presentation must not propagate Unity or rendering failures into the game loop.")]
         internal static void UpdatePresentation()
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (configuration == null || !configuration.EnableInGameDiagnostics.Value)
                 {
                     return;
                 }
 
-                AdjustmentDiagnosticRecord latest;
+                AdjustmentDiagnosticRecord? latest;
                 if (!DiagnosticsRecorder.TryGetLatest(out latest) || latest == null)
                 {
                     return;
@@ -77,11 +86,15 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Shutdown must clear diagnostic state even when Unity object destruction fails.")]
         internal static void Shutdown()
         {
             try
             {
-                DiagnosticsOverlayBehaviour host;
+                DiagnosticsOverlayBehaviour? host;
                 lock (HostGate)
                 {
                     host = _host;
@@ -101,13 +114,12 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional Unity host creation must disable diagnostics instead of breaking a frame.")]
         private static void EnsurePresentationHost()
         {
-            if (_host != null)
-            {
-                return;
-            }
-
             lock (HostGate)
             {
                 if (_host != null)
@@ -115,7 +127,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     return;
                 }
 
-                GameObject hostObject = null;
+                GameObject? hostObject = null;
                 try
                 {
                     hostObject = new GameObject("Janky-BallisticPenetration.Diagnostics");

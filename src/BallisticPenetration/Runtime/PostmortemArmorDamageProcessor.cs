@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using EFT;
 using EFT.Ballistics;
@@ -25,6 +26,10 @@ namespace BallisticPenetration.Runtime
 
         private static int _failureLogged;
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional postmortem durability processing must fail open for every EFT inventory failure.")]
         internal static void TryApply(
             BodyPartCollider collider,
             EArmorPlateCollider armorPlateCollider,
@@ -32,13 +37,13 @@ namespace BallisticPenetration.Runtime
         {
             try
             {
-                PluginConfiguration configuration = Plugin.Configuration;
+                PluginConfiguration? configuration = Plugin.Configuration;
                 if (collider == null || configuration == null)
                 {
                     return;
                 }
 
-                Player retainedPlayer = collider.Player as Player;
+                Player? retainedPlayer = collider.Player as Player;
                 if (retainedPlayer != null
                     && retainedPlayer.HealthController != null
                     && retainedPlayer.HealthController.IsAlive)
@@ -46,7 +51,7 @@ namespace BallisticPenetration.Runtime
                     return;
                 }
 
-                Corpse corpse = collider.GetComponentInParent<Corpse>();
+                Corpse? corpse = collider.GetComponentInParent<Corpse>();
                 bool isDeadRetainedPlayer = retainedPlayer != null
                     && retainedPlayer.HealthController != null
                     && !retainedPlayer.HealthController.IsAlive;
@@ -78,7 +83,7 @@ namespace BallisticPenetration.Runtime
                     return;
                 }
 
-                SkillManager skills = retainedPlayer != null ? retainedPlayer.Skills : null;
+                SkillManager? skills = retainedPlayer != null ? retainedPlayer.Skills : null;
                 SkillManager.FloatBuff lightVestReduction = skills != null
                     ? skills.LightVestMeleeWeaponDamageReduction
                     : NeutralLightVestReduction;
@@ -155,6 +160,10 @@ namespace BallisticPenetration.Runtime
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Optional logging must never change an armor-hit result.")]
         private static void LogAppliedArmorDamage(
             ArmorComponent armor,
             BodyPartCollider collider,
@@ -184,9 +193,9 @@ namespace BallisticPenetration.Runtime
         }
 
         private static bool TryCollectArmorComponents(
-            Player retainedPlayer,
+            Player? retainedPlayer,
             bool isDeadRetainedPlayer,
-            Corpse corpse,
+            Corpse? corpse,
             List<ArmorComponent> armorComponents)
         {
             if (isDeadRetainedPlayer
@@ -197,7 +206,7 @@ namespace BallisticPenetration.Runtime
                 return true;
             }
 
-            InventoryEquipment equipment = corpse != null
+            InventoryEquipment? equipment = corpse != null
                 ? corpse.Item as InventoryEquipment
                 : null;
             if (equipment == null)

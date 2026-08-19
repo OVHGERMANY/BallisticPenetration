@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Community alpha testing guide
+    url: https://github.com/OVHGERMANY/BallisticPenetration/blob/development/physical-projectile-system/docs/community-alpha/TESTING_GUIDE.md
+    about: Check the supported build, test priorities, and evidence guidance before filing.
