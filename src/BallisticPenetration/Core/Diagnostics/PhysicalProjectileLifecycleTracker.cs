@@ -194,6 +194,21 @@ namespace BallisticPenetration.Core.Diagnostics
                 && _activeByIdentity.ContainsKey(projectileIdentity);
         }
 
+        internal bool TryGetActiveSnapshot(
+            string projectileIdentity,
+            out PhysicalLifecycleSnapshot? snapshot)
+        {
+            snapshot = null;
+            if (string.IsNullOrWhiteSpace(projectileIdentity)
+                || !_activeByIdentity.TryGetValue(projectileIdentity, out ActiveEntry? active))
+            {
+                return false;
+            }
+
+            snapshot = active.Snapshot;
+            return true;
+        }
+
         internal bool TryRegister(PhysicalLifecycleSnapshot snapshot)
         {
             if (snapshot == null

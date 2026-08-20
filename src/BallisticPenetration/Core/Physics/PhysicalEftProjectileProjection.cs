@@ -52,6 +52,8 @@ namespace BallisticPenetration.Core.Physics
             double speedMetresPerSecond,
             PhysicalVector3 direction,
             double ballisticCoefficient,
+            double unstabilizedBallisticCoefficient,
+            bool trajectoryStabilityApplied,
             double damage,
             double penetrationPower,
             double damageCapabilityRatio,
@@ -62,6 +64,8 @@ namespace BallisticPenetration.Core.Physics
             SpeedMetresPerSecond = speedMetresPerSecond;
             Direction = direction;
             BallisticCoefficient = ballisticCoefficient;
+            UnstabilizedBallisticCoefficient = unstabilizedBallisticCoefficient;
+            TrajectoryStabilityApplied = trajectoryStabilityApplied;
             Damage = damage;
             PenetrationPower = penetrationPower;
             DamageCapabilityRatio = damageCapabilityRatio;
@@ -77,6 +81,10 @@ namespace BallisticPenetration.Core.Physics
         public PhysicalVector3 Direction { get; }
 
         public double BallisticCoefficient { get; }
+
+        public double UnstabilizedBallisticCoefficient { get; }
+
+        public bool TrajectoryStabilityApplied { get; }
 
         public double Damage { get; }
 
@@ -94,6 +102,12 @@ namespace BallisticPenetration.Core.Physics
     public static class PhysicalEftProjectileProjector
     {
         private const double RelativeTolerance = 0.000000001d;
+
+        // EFT advances drag with a fixed 10 ms explicit-Euler step. Substituting its published
+        // trajectory fields into that update cancels mass and diameter and yields this minimum
+        // coefficient for a non-reversing first step at the maximum G1 drag-table value.
+        private const double HostTrajectoryStabilityCoefficientPerMetrePerSecond =
+            0.000004440804472049359d;
 
         public static bool TryProject(
             PhysicalEftProjectionInput? input,
@@ -163,9 +177,15 @@ namespace BallisticPenetration.Core.Physics
 
             double massGrams = component.RetainedMassKilograms * 1000d;
             double diameterMillimetres = component.EquivalentDiameterMetres * 1000d;
-            double ballisticCoefficient = input.ParentEftBallisticCoefficient
+            double unstabilizedBallisticCoefficient = input.ParentEftBallisticCoefficient
                 * component.BallisticCoefficientKilogramsPerSquareMetre
                 / parent.BallisticCoefficientKilogramsPerSquareMetre;
+            double minimumStableBallisticCoefficient =
+                HostTrajectoryStabilityCoefficientPerMetrePerSecond
+                * component.SpeedMetresPerSecond;
+            double ballisticCoefficient = Math.Max(
+                unstabilizedBallisticCoefficient,
+                minimumStableBallisticCoefficient);
             double damage = input.ParentEftDamage
                 * damageRatio
                 * input.DamageTransferMultiplier;
@@ -189,6 +209,8 @@ namespace BallisticPenetration.Core.Physics
                 component.SpeedMetresPerSecond,
                 direction,
                 ballisticCoefficient,
+                unstabilizedBallisticCoefficient,
+                ballisticCoefficient > unstabilizedBallisticCoefficient,
                 damage,
                 penetrationPower,
                 damageRatio,

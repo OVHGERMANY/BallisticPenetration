@@ -1,5 +1,20 @@
 # Automatic Field Report Recorder - Active Plan
 
+## Collision Telemetry Repair Milestone - 2026-08-20
+
+- [x] Exact `1,898`-record partial report preserved and SHA-256 verified.
+- [x] Checked collision hash overflow reproduced from source and repaired with explicit unchecked arithmetic.
+- [x] Production collision dedupe path stress-tested with `5,000` varied keys and complete observed/resolved pairs.
+- [x] Runtime errors now retain one sanitized full record, power-of-two repetition aggregates, and final totals.
+- [x] Mismatched/recycled shot context is rejected in favor of tracker snapshot or binding-creation state.
+- [x] Target-spall numerical runaway traced to EFT's fixed `10 ms` explicit-Euler drag step with an unstable low projected coefficient.
+- [x] Physical-to-EFT projection applies a derived non-reversing coefficient floor; no speed clamp was added.
+- [x] `numeric-runaway` captures the first rejected host-flight reconciliation once per projectile/stage.
+- [x] Release build succeeds with `0 warnings, 0 errors`.
+- [x] Complete validation succeeds: `66 passed, 0 failed`.
+- [ ] Local deployment and runtime smoke test.
+- [ ] GitHub Test 2 release publication; explicitly not performed in this milestone.
+
 ## Status
 
 - [x] Implementation complete.
@@ -108,4 +123,4 @@ Produce one automatic, self-contained, append-only JSONL `.bpreport` per game pr
 
 ## Exact Next Action
 
-Launch SPT and perform a field-report smoke test.
+Deploy the new development DLL with rollback backup and SHA-256 verification, then run a target-spall plus multilayer field-report smoke test. Do not publish GitHub Test 2 until collision pairs are complete and no `numeric-runaway` record appears.

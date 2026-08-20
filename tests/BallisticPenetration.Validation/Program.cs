@@ -139,6 +139,9 @@ namespace BallisticPenetration.Validation
                 "Physical collision observed/resolved correlation and deduplication",
                 ValidatePhysicalCollisionObservedResolvedCorrelation);
             Run(
+                "Checked collision deduplication stress uses production path",
+                ValidateProductionCollisionDeduplicationStress);
+            Run(
                 "Bounded physical lifecycle terminal diagnostics",
                 ValidatePhysicalLifecycleTerminalDiagnostics);
             Run("Field report session-start JSON", ValidateFieldReportSessionStart);
@@ -154,6 +157,9 @@ namespace BallisticPenetration.Validation
             Run("Field report active partial retention protection", ValidateFieldReportActivePartialProtection);
             Run("Field report size truncation and critical eligibility", ValidateFieldReportTruncation);
             Run("Field report privacy path exclusions", ValidateFieldReportPrivacy);
+            Run("Field report runtime-error detail and aggregation", ValidateRuntimeErrorEvidence);
+            Run("Recycled shot report context rejects pooled state", ValidateRecycledShotReportContext);
+            Run("Numeric runaway detection catches first corrupted transition", ValidateNumericRunawayDetection);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical child seeds stay inside the host random table", ValidatePhysicalHostRandomSeed);
@@ -170,6 +176,7 @@ namespace BallisticPenetration.Validation
             Run("Target spall survives later deformation and fragmentation", ValidateTargetSpallContinuation);
             Run("Measured root projectiles derive SI geometry and energy", ValidatePhysicalRootProjectileFactory);
             Run("Physical fragments project to independent EFT shot values", ValidatePhysicalEftProjection);
+            Run("Target-spall host trajectory remains numerically stable", ValidateTargetSpallHostTrajectoryStability);
             Run("Physical-to-EFT projection fails open", ValidatePhysicalEftProjectionFallback);
             Run("Physical fragment flight advances from measured EFT motion", ValidatePhysicalFlightState);
             Run("Zero host fragment count closes physical reservations", ValidatePhysicalFragmentationMinimumOutput);
@@ -1004,54 +1011,48 @@ namespace BallisticPenetration.Validation
                 expectedRecordSequence,
                 ResolveCollisionOrdinalFromSequence(resolvedCollision.Sequence));
 
-            var tracker = new PhysicalCollisionObservedResolvedTracker();
+            var tracker = new PhysicalCollisionEventDeduplicator();
             AssertTrue(
                 "first observed event is emitted",
-                tracker.TryEmit(
+                tracker.TryRecord(
                     parent.ProjectileId,
                     expectedCollisionId,
-                    "observed",
-                    expectedRecordSequence));
+                    "observed"));
             AssertTrue(
                 "first resolved event is emitted",
-                tracker.TryEmit(
+                tracker.TryRecord(
                     parent.ProjectileId,
                     expectedCollisionId,
-                    "resolved",
-                    resolvedCollision.Sequence));
+                    "resolved"));
 
             AssertTrue(
                 "duplicate observed event is suppressed",
-                !tracker.TryEmit(
+                !tracker.TryRecord(
                     parent.ProjectileId,
                     expectedCollisionId,
-                    "observed",
-                    expectedRecordSequence));
+                    "observed"));
             AssertTrue(
                 "duplicate resolved event is suppressed",
-                !tracker.TryEmit(
+                !tracker.TryRecord(
                     parent.ProjectileId,
                     expectedCollisionId,
-                    "resolved",
-                    resolvedCollision.Sequence));
+                    "resolved"));
 
             string replacementCollisionIdentity = parent.ProjectileId + "-collision-" + (expectedRecordSequence + 1);
             AssertTrue(
                 "distinct collision for same projectile still records",
-                tracker.TryEmit(
+                tracker.TryRecord(
                     parent.ProjectileId,
                     replacementCollisionIdentity,
-                    "observed",
-                    expectedRecordSequence + 1));
+                    "observed"));
 
             string otherProjectile = "other-" + parent.ProjectileId;
             AssertTrue(
                 "same recordSequence on different projectiles does not dedupe",
-                tracker.TryEmit(
+                tracker.TryRecord(
                     otherProjectile,
                     expectedCollisionId,
-                    "observed",
-                    expectedRecordSequence));
+                    "observed"));
 
             ResolvedLifecycleSemantics stopped = CalculateResolvedLifecycleSemantics(
                 PhysicalCollisionOutcome.Stopped,
@@ -1080,14 +1081,13 @@ namespace BallisticPenetration.Validation
                 "replacement continuation sets continued true and replaced true",
                 replacement.Continued && replacement.Replaced);
 
-            tracker.Retire(parent.ProjectileId);
+            tracker.ClearProjectile(parent.ProjectileId);
             AssertTrue(
                 "dedupe state is cleared on retirement",
-                tracker.TryEmit(
+                tracker.TryRecord(
                     parent.ProjectileId,
                     expectedCollisionId,
-                    "resolved",
-                    resolvedCollision.Sequence));
+                    "resolved"));
         }
 
         private static void ValidatePhysicalLifecycleTerminalDiagnostics()
@@ -1291,17 +1291,17 @@ namespace BallisticPenetration.Validation
                 bounded.ContainsTombstone("bounded-3")
                     && bounded.ContainsTombstone("bounded-4"));
 
-            var correlation = new PhysicalCollisionObservedResolvedTracker();
+            var correlation = new PhysicalCollisionEventDeduplicator();
             AssertTrue(
                 "collision-observed correlation remains emitted once",
-                correlation.TryEmit("correlated", "collision-1", "observed", 1));
+                correlation.TryRecord("correlated", "collision-1", "observed"));
             AssertTrue(
                 "collision-resolved correlation remains independently emitted once",
-                correlation.TryEmit("correlated", "collision-1", "resolved", 1));
+                correlation.TryRecord("correlated", "collision-1", "resolved"));
             AssertTrue(
                 "collision phase deduplication from 611e8a7 remains preserved",
-                !correlation.TryEmit("correlated", "collision-1", "observed", 1)
-                    && !correlation.TryEmit("correlated", "collision-1", "resolved", 1));
+                !correlation.TryRecord("correlated", "collision-1", "observed")
+                    && !correlation.TryRecord("correlated", "collision-1", "resolved"));
         }
 
         private static PhysicalLifecycleSnapshot CreateLifecycleSnapshot(
@@ -1319,6 +1319,202 @@ namespace BallisticPenetration.Validation
                 new PhysicalVector3(400d, 0d, 0d),
                 string.Empty,
                 0);
+        }
+
+        private static void ValidateProductionCollisionDeduplicationStress()
+        {
+            var deduplicator = new PhysicalCollisionEventDeduplicator();
+            const int uniqueKeys = 5000;
+            int observed = 0;
+            int resolved = 0;
+            for (int index = 0; index < uniqueKeys; index++)
+            {
+                string projectile = "stress-projectile-"
+                    + (index % 997).ToString(CultureInfo.InvariantCulture);
+                string collision = "stress-collision-"
+                    + index.ToString(CultureInfo.InvariantCulture)
+                    + "-"
+                    + new string((char)('a' + (index % 26)), 24 + (index % 79));
+
+                if (deduplicator.TryRecord(projectile, collision, "observed"))
+                {
+                    observed++;
+                }
+
+                if (deduplicator.TryRecord(projectile, collision, "resolved"))
+                {
+                    resolved++;
+                }
+
+                AssertTrue(
+                    "duplicate observed suppressed " + index,
+                    !deduplicator.TryRecord(projectile, collision, "observed"));
+                AssertTrue(
+                    "duplicate resolved suppressed " + index,
+                    !deduplicator.TryRecord(projectile, collision, "resolved"));
+            }
+
+            AssertEqual("one observed event per unique key", uniqueKeys, observed);
+            AssertEqual("one resolved event per unique key", uniqueKeys, resolved);
+            AssertTrue(
+                "observed and resolved phases are independent",
+                deduplicator.TryRecord("phase-projectile", "phase-collision", "observed")
+                    && deduplicator.TryRecord("phase-projectile", "phase-collision", "resolved"));
+            AssertTrue(
+                "same collision identity remains independent across projectiles",
+                deduplicator.TryRecord("independent-a", "shared-collision", "observed")
+                    && deduplicator.TryRecord("independent-b", "shared-collision", "observed"));
+            deduplicator.ClearProjectile("independent-a");
+            AssertTrue(
+                "retired projectile dedupe state clears without touching peers",
+                deduplicator.TryRecord("independent-a", "shared-collision", "observed")
+                    && !deduplicator.TryRecord("independent-b", "shared-collision", "observed"));
+        }
+
+        private static void ValidateRuntimeErrorEvidence()
+        {
+            var accumulator = new FieldReportRuntimeErrorAccumulator();
+            string privatePath = @"C:\Users\" + Environment.UserName + @"\private\report.txt";
+            Exception exception;
+            try
+            {
+                ThrowRuntimeErrorForValidation(privatePath);
+                throw new InvalidOperationException("Runtime-error validation did not throw.");
+            }
+            catch (InvalidOperationException caught)
+            {
+                exception = caught;
+            }
+            DateTimeOffset firstAt = new DateTimeOffset(2026, 8, 20, 20, 0, 0, TimeSpan.Zero);
+            FieldReportRuntimeErrorSnapshot first = accumulator.Capture(
+                "Physical projectile lifecycle diagnostics",
+                exception,
+                firstAt);
+            AssertTrue("first runtime error retains full detail", first.IncludeFullDetail);
+            AssertEqual("first runtime error occurrence count", 1, first.OccurrenceCount);
+            AssertEqual("runtime error HRESULT retained", exception.HResult, first.HResult);
+            AssertTrue(
+                "runtime error message removes filesystem path",
+                !first.SanitizedMessage.Contains(privatePath, StringComparison.OrdinalIgnoreCase));
+            AssertTrue(
+                "runtime error message removes credentials",
+                !first.SanitizedMessage.Contains("do-not-record", StringComparison.Ordinal));
+            AssertTrue(
+                "runtime error message removes machine name",
+                string.IsNullOrWhiteSpace(Environment.MachineName)
+                    || !first.SanitizedMessage.Contains(
+                        Environment.MachineName,
+                        StringComparison.OrdinalIgnoreCase));
+            AssertTrue(
+                "runtime error fingerprint is stable and bounded",
+                first.StackFingerprint.Length == 24);
+            AssertTrue("runtime error retains safe top method names", first.TopMethods.Length > 0);
+
+            FieldReportRuntimeErrorSnapshot latest = first;
+            for (int occurrence = 2; occurrence <= 4096; occurrence++)
+            {
+                latest = accumulator.Capture(
+                    "Physical projectile lifecycle diagnostics",
+                    exception,
+                    firstAt.AddMilliseconds(occurrence));
+                AssertTrue(
+                    "repeated runtime error omits repeated full detail " + occurrence,
+                    !latest.IncludeFullDetail);
+            }
+
+            AssertEqual("repeated runtime error count is bounded aggregate", 4096, latest.OccurrenceCount);
+            AssertTrue(
+                "power-of-two runtime error aggregate emitted",
+                FieldReportRuntimeErrorAccumulator.ShouldEmitAggregate(latest.OccurrenceCount));
+            AssertTrue(
+                "non-power-of-two runtime error aggregate suppressed",
+                !FieldReportRuntimeErrorAccumulator.ShouldEmitAggregate(4095));
+            IReadOnlyList<FieldReportRuntimeErrorSnapshot> totals = accumulator.SnapshotTotals();
+            AssertTrue(
+                "runtime error final total is retained for session end",
+                totals.Count == 1 && totals[0].OccurrenceCount == 4096);
+        }
+
+        private static void ThrowRuntimeErrorForValidation(string privatePath)
+        {
+            throw new InvalidOperationException(
+                "Failure at " + privatePath
+                    + " on " + Environment.MachineName
+                    + " token=do-not-record");
+        }
+
+        private static void ValidateRecycledShotReportContext()
+        {
+            var tracker = new PhysicalProjectileLifecycleTracker();
+            PhysicalLifecycleSnapshot creation = CreateLifecycleSnapshot("recycled-context", 1d);
+            AssertTrue("recycled context lifecycle registered", tracker.TryRegister(creation));
+            var verifiedPosition = new PhysicalVector3(10d, 20d, 30d);
+            var verifiedVelocity = new PhysicalVector3(400d, 5d, -2d);
+            AssertTrue(
+                "recycled context tracker accepts verified observation",
+                tracker.TryObserve(
+                    creation.ProjectileIdentity,
+                    verifiedPosition,
+                    verifiedVelocity,
+                    "collision-safe",
+                    1));
+            AssertTrue(
+                "recycled context tracker snapshot available",
+                tracker.TryGetActiveSnapshot(
+                    creation.ProjectileIdentity,
+                    out PhysicalLifecycleSnapshot? snapshot));
+            PhysicalLifecycleReportContext stale = PhysicalLifecycleReportContext.Resolve(
+                false,
+                new PhysicalVector3(9e12d, 8e12d, 7e12d),
+                new PhysicalVector3(6e12d, 5e12d, 4e12d),
+                snapshot,
+                creation.LastKnownPosition,
+                creation.LastKnownVelocity);
+            AssertTrue("recycled shot is marked mismatched", !stale.ShotBindingMatched);
+            AssertEqual("recycled shot uses tracker snapshot", "tracker-snapshot", stale.ContextSource);
+            AssertEqual("recycled shot rejects pooled position", verifiedPosition, stale.Position);
+            AssertEqual("recycled shot rejects pooled velocity", verifiedVelocity, stale.Velocity);
+
+            PhysicalLifecycleReportContext creationOnly = PhysicalLifecycleReportContext.Resolve(
+                false,
+                new PhysicalVector3(9e12d, 8e12d, 7e12d),
+                new PhysicalVector3(6e12d, 5e12d, 4e12d),
+                null,
+                creation.LastKnownPosition,
+                creation.LastKnownVelocity);
+            AssertEqual("missing tracker falls back to binding creation", "binding-creation", creationOnly.ContextSource);
+            AssertEqual("binding creation position retained", creation.LastKnownPosition, creationOnly.Position);
+        }
+
+        private static void ValidateNumericRunawayDetection()
+        {
+            const double massKilograms = 0.000035466922248116548d;
+            const double assignedEnergyJoules = 5.8070849995439389d;
+            var projectedVelocity = new PhysicalVector3(
+                501.03125d,
+                197.43785095214844d,
+                193.52210998535156d);
+            AssertTrue(
+                "representative target spall creation is not runaway",
+                !PhysicalNumericRunawayDetector.IsRunaway(
+                    assignedEnergyJoules,
+                    massKilograms,
+                    projectedVelocity,
+                    new PhysicalVector3(-14.38d, 0.79d, 25.79d)));
+            AssertTrue(
+                "representative corrupted host transition is detected",
+                PhysicalNumericRunawayDetector.IsRunaway(
+                    assignedEnergyJoules,
+                    massKilograms,
+                    new PhysicalVector3(-573790.875d, -226148.03125d, -221625.40625d),
+                    new PhysicalVector3(-44697702400d, -17616693248d, -17264386048d)));
+            AssertTrue(
+                "non-finite numeric transition is detected",
+                PhysicalNumericRunawayDetector.IsRunaway(
+                    assignedEnergyJoules,
+                    massKilograms,
+                    new PhysicalVector3(double.PositiveInfinity, 0d, 0d),
+                    PhysicalVector3.Zero));
         }
 
         private static void ValidateFieldReportSessionStart()
@@ -1356,6 +1552,8 @@ namespace BallisticPenetration.Validation
             AssertEqual("lifecycle incoming speed retained", 900d, root.GetProperty("incomingSpeed").GetDouble());
             AssertEqual("lifecycle outgoing speed retained", 600d, root.GetProperty("outgoingSpeed").GetDouble());
             AssertEqual("lifecycle replacement relationship retained", "source-collision:collision-3", root.GetProperty("replacementRelationship").GetString());
+            AssertTrue("lifecycle binding match retained", root.GetProperty("shotBindingMatched").GetBoolean());
+            AssertEqual("lifecycle context source retained", "current-shot", root.GetProperty("contextSource").GetString());
         }
 
         private static void ValidateFieldReportConcurrency()
@@ -1699,7 +1897,9 @@ namespace BallisticPenetration.Validation
                 "BoxCollider:armor",
                 10d,
                 10d,
-                "source-collision:collision-3");
+                "source-collision:collision-3",
+                true,
+                "current-shot");
         }
 
         private static FieldReportRecorder CreateFieldReportRecorder(
@@ -4870,11 +5070,14 @@ namespace BallisticPenetration.Validation
                 fragment.SpeedMetresPerSecond,
                 value.SpeedMetresPerSecond);
             AssertNear(
-                "fragment EFT drag projected by physical sectional ratio",
+                "fragment unstabilized EFT drag uses physical sectional ratio",
                 input.ParentEftBallisticCoefficient
                     * fragment.BallisticCoefficientKilogramsPerSquareMetre
                     / parent.BallisticCoefficientKilogramsPerSquareMetre,
-                value.BallisticCoefficient);
+                value.UnstabilizedBallisticCoefficient);
+            AssertTrue(
+                "fragment EFT drag never falls below host stability requirement",
+                value.BallisticCoefficient >= value.UnstabilizedBallisticCoefficient);
             AssertNear(
                 "fragment damage capability ratio",
                 fragment.DamageCapabilityJoules / parent.DamageCapabilityJoules,
@@ -4906,6 +5109,157 @@ namespace BallisticPenetration.Validation
             AssertTrue(
                 "projected fragment does not retain whole-projectile diameter",
                 !value.EquivalentDiameterMillimetres.Equals(parent.EquivalentDiameterMetres * 1000d));
+        }
+
+        private static void ValidateTargetSpallHostTrajectoryStability()
+        {
+            PhysicalProjectileState parent = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(895.18021715102418d, 0.016100000381469727d, 0.00858d));
+            PhysicalProjectileMaterialProfile projectileProfile = CreateTestProjectileProfile();
+            PhysicalTargetMaterialProfile targetProfile = CreateTestTargetProfile(
+                50000000d,
+                0.5d);
+            PhysicalDeformationInput deformationInput = CreateValidDeformationInput(
+                parent,
+                PhysicalCollisionOutcome.Penetrated,
+                0.01d,
+                0.01d,
+                50000000d,
+                0.5d,
+                "collision-reported-target-spall",
+                parent.ProjectileId);
+            deformationInput.ProjectileProfile = projectileProfile;
+            deformationInput.TargetProfile = targetProfile;
+            PhysicalDeformationResponse deformation = SolveDeformationOrThrow(deformationInput);
+            PhysicalFragmentationProfileInput profileInput = CreateTestFragmentationProfileInput();
+            profileInput.TargetSpallEjectedMassFraction = 0.02d;
+            profileInput.TargetSpallKineticEnergyFraction = 0.10d;
+            profileInput.NominalTargetSpallMassKilograms = 0.00005d;
+            profileInput.MaximumTargetSpallCount = 24;
+            profileInput.TargetSpallConeHalfAngleRadians = 0.70d;
+            profileInput.MinimumTargetSpallAspectRatio = 0.20d;
+            profileInput.MaximumTargetSpallAspectRatio = 2.5d;
+            profileInput.MinimumTargetSpallDragCoefficient = 0.8d;
+            profileInput.MaximumTargetSpallDragCoefficient = 2.5d;
+            profileInput.TargetSpallPenetrationEfficiency = 0.35d;
+            AssertTrue(
+                "reported target-spall profile accepted",
+                PhysicalFragmentationProfile.TryCreate(
+                    profileInput,
+                    out PhysicalFragmentationProfile? fragmentationProfile,
+                    out PhysicalFragmentationProfileFailureReason profileReason)
+                    && profileReason == PhysicalFragmentationProfileFailureReason.None
+                    && fragmentationProfile != null);
+            var spallInput = new PhysicalTargetSpallInput
+            {
+                Parent = parent,
+                DeformationResponse = deformation,
+                TargetProfile = targetProfile,
+                FragmentationProfile = fragmentationProfile,
+                TargetSpallIdPrefix = "reported-target-spall"
+            };
+            AssertTrue(
+                "reported target-spall scenario solves",
+                PhysicalFragmentationSolver.TrySolveTargetSpall(
+                    spallInput,
+                    out PhysicalTargetSpallResponse? response,
+                    out PhysicalTargetSpallFailureReason spallReason)
+                    && spallReason == PhysicalTargetSpallFailureReason.None
+                    && response != null);
+            PhysicalTargetSpallResponse responseValue = RequireValue(
+                "reported target-spall response",
+                response);
+            AssertTrue("target-spall stability scenario emits components", responseValue.Components.Count > 0);
+
+            PhysicalProjectileStateInput representativeInput = CopyPhysicalStateToInput(
+                responseValue.Components[0]);
+            const double reportedMassKilograms = 0.000035466922248116548d;
+            var reportedVelocity = new PhysicalVector3(
+                501.03126133229051d,
+                197.43785586575765d,
+                193.52211157852554d);
+            const double representativeDiameterMetres = 0.004d;
+            double representativeAreaSquareMetres = Math.PI
+                * representativeDiameterMetres
+                * representativeDiameterMetres
+                / 4d;
+            double reportedEnergyJoules = 0.5d
+                * reportedMassKilograms
+                * reportedVelocity.Magnitude
+                * reportedVelocity.Magnitude;
+            representativeInput.ProjectileId = "reported-target-spall-12";
+            representativeInput.FragmentIndex = 12;
+            representativeInput.OriginalMassKilograms = reportedMassKilograms;
+            representativeInput.RetainedMassKilograms = reportedMassKilograms;
+            representativeInput.NominalDiameterMetres = representativeDiameterMetres;
+            representativeInput.DeformedDiameterMetres = representativeDiameterMetres;
+            representativeInput.ProjectedAreaSquareMetres = representativeAreaSquareMetres;
+            representativeInput.LengthMetres = 0.0008d;
+            representativeInput.DragCoefficient = 2.5d;
+            representativeInput.VelocityMetresPerSecond = reportedVelocity;
+            AssertTrue(
+                "reported target-spall orientation accepted",
+                PhysicalOrientation.TryFromForward(
+                    reportedVelocity,
+                    out PhysicalOrientation reportedOrientation));
+            representativeInput.Orientation = reportedOrientation;
+            representativeInput.YawAngleRadians = 0d;
+            representativeInput.TumbleState = PhysicalProjectileTumbleState.Stable;
+            representativeInput.PenetrationCapabilityJoulesPerSquareMetre =
+                reportedEnergyJoules / representativeAreaSquareMetres * 0.35d;
+            representativeInput.DamageCapabilityJoules = reportedEnergyJoules;
+            PhysicalProjectileState component = CreatePhysicalStateOrThrow(representativeInput);
+            var projectionInput = new PhysicalEftProjectionInput
+            {
+                Parent = parent,
+                Component = component,
+                ParentEftBallisticCoefficient = 0.477d,
+                ParentEftDamage = 117.46242523193359d,
+                ParentEftPenetrationPower = 85.495849609375d
+            };
+            AssertTrue(
+                "reported target-spall projection accepted",
+                PhysicalEftProjectileProjector.TryProject(
+                    projectionInput,
+                    out PhysicalEftProjectileProjection? stabilized,
+                    out PhysicalEftProjectionFailureReason projectionReason)
+                    && projectionReason == PhysicalEftProjectionFailureReason.None
+                    && stabilized != null);
+            PhysicalEftProjectileProjection value = RequireValue(
+                "stabilized target-spall projection",
+                stabilized);
+            AssertTrue(
+                "target-spall stability floor raises only unstable host coefficient",
+                value.TrajectoryStabilityApplied
+                    && value.BallisticCoefficient > value.UnstabilizedBallisticCoefficient);
+
+            const double maximumG1DragTableValue = 0.6625d;
+            const double hostStepSeconds = 0.01d;
+            double speed = value.SpeedMetresPerSecond;
+            double hostDragAcceleration = (1.2d * Math.PI / 8d)
+                * 0.0014223d
+                * maximumG1DragTableValue
+                * speed
+                * speed
+                / value.BallisticCoefficient;
+            double nextSpeed = speed - (hostDragAcceleration * hostStepSeconds);
+            AssertTrue(
+                "stabilized host step cannot reverse target-spall velocity",
+                nextSpeed >= -0.000000001d && nextSpeed <= speed);
+            double energyPermittedSpeed = Math.Sqrt(
+                (2d * component.TranslationalKineticEnergyJoules)
+                    / component.RetainedMassKilograms);
+            AssertNear(
+                "target-spall child speed is limited by assigned energy and mass",
+                energyPermittedSpeed,
+                value.SpeedMetresPerSecond);
+            AssertNear(
+                "target-spall assigned energy closes after projection",
+                component.TranslationalKineticEnergyJoules,
+                0.5d
+                    * component.RetainedMassKilograms
+                    * value.SpeedMetresPerSecond
+                    * value.SpeedMetresPerSecond);
         }
 
         private static void ValidatePhysicalEftProjectionFallback()
@@ -5858,41 +6212,6 @@ namespace BallisticPenetration.Validation
             internal bool Continued { get; set; }
 
             internal bool Replaced { get; set; }
-        }
-
-        private sealed class PhysicalCollisionObservedResolvedTracker
-        {
-            private readonly Dictionary<string, HashSet<(string CollisionIdentity, string Phase)>> _byProjectile
-                = new Dictionary<string, HashSet<(string, string)>>(StringComparer.Ordinal);
-
-            internal bool TryEmit(
-                string projectileId,
-                string collisionIdentity,
-                string phase,
-                int collisionSequence)
-            {
-                if (string.IsNullOrWhiteSpace(projectileId)
-                    || string.IsNullOrWhiteSpace(collisionIdentity)
-                    || string.IsNullOrWhiteSpace(phase))
-                {
-                    return false;
-                }
-
-                if (!_byProjectile.TryGetValue(
-                        projectileId,
-                        out HashSet<(string CollisionIdentity, string Phase)>? phases))
-                {
-                    phases = new HashSet<(string CollisionIdentity, string Phase)>();
-                    _byProjectile[projectileId] = phases;
-                }
-
-                return phases.Add((collisionIdentity, phase));
-            }
-
-            internal void Retire(string projectileId)
-            {
-                _byProjectile.Remove(projectileId);
-            }
         }
 
         private static PhysicalProjectileStateInput CopyPhysicalStateToInput(

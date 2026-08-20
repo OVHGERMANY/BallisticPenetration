@@ -7,19 +7,19 @@
 ## Runtime Branch / Commit
 - Branch: `development/physical-projectile-system`
 - Field-report milestone base HEAD: `d3eda0a`
-- Pending checkpoint: `Add automatic projectile field reports`
+- Pending checkpoint: `Fix collision telemetry and target-spall runaway`
 
 ## Active Objective
-- Automatic, self-contained, local `.bpreport` field bug reports with bounded asynchronous writing, manual issue markers, crash recovery, size limiting, retention, and privacy controls.
-- Gameplay physics remains unchanged.
+- Repair checked-build collision telemetry, improve bounded runtime-error evidence, reject stale pooled-shot context, and prevent the proven target-spall host-trajectory numerical instability.
 
 ## Fixed Constraints
-- No gameplay behavior changes in this milestone.
-- Changes are constrained to diagnostics/verification plumbing.
-- No changes to projectile kinematics, damage, penetration, fragments, or collision outcomes unless task explicitly allows.
+- No arbitrary speed clamp and no global checked-arithmetic disable.
+- The only authorized physical change is the smallest source-proven host-integration stability correction; all other changes remain observational.
+- No release publication or deployment in this milestone.
 
 ## Known Unresolved Defects
 - A projectile can cross multiple layers at the same recorded velocity while penetration and damage compound (diagnostics investigation target).
+- The field report retained `225` terminal-missing and `6` terminal-duplicate events; these remain visible and unresolved pending clean collision evidence.
 
 ## Files Currently Involved
 - `src/BallisticPenetration/Core/Diagnostics/FieldReportRecord.cs`
@@ -36,6 +36,13 @@
 - `docs/exec-plans/active/field-report-recorder.md`
 
 ## Latest Completed Work
+- Replaced the runtime collision tuple set with the production `PhysicalCollisionEventDeduplicator`; its checked-build hash combination is explicitly `unchecked` without changing ordinal equality semantics.
+- Added a `5000`-key production-path stress validation covering observed/resolved independence, per-projectile identity, and duplicate suppression.
+- Added sanitized runtime-error detail with UTC/local timestamps, HRESULT, top method names, a stable fingerprint, power-of-two repetition aggregates, and final per-fingerprint totals.
+- Added `shotBindingMatched` and `contextSource`; mismatched pooled shots now use the lifecycle tracker's last immutable snapshot or binding-creation state and never read current pooled-shot context.
+- Proved a target-spall runaway path in EFT's fixed `10 ms` explicit-Euler trajectory integration: sufficiently small projected coefficients allow one drag step to reverse velocity and subsequent steps to compound magnitude.
+- Added a derived physical-to-EFT coefficient floor of `0.000004440804472049359 * initialSpeedMetresPerSecond`, based on EFT's maximum G1 table value with a `0.01%` rounding margin. This prevents velocity reversal without clamping speed or changing assigned mass/energy.
+- Added fail-open, once-per-projectile/stage `numeric-runaway` evidence before host-flight reconciliation accepts corrupted state.
 - Added automatic per-process `.bpreport` JSONL recording under the current BepInEx installation.
 - Added a fixed-capacity `4096`-record nonblocking producer queue with deterministic overflow accounting and a dedicated writer thread.
 - Added one-second default flushing, prompt critical-event flush requests, bounded report size, and deterministic oldest-first owned-file retention.
@@ -77,8 +84,9 @@
 
 ## Latest Build and Validation
 - BallisticPenetration build: succeeded with 0 warnings and 0 errors.
-- BallisticPenetration validation: `61 passed, 0 failed`.
-- No gameplay kinematic, collision, damage, penetration, fragmentation, armor, gore, or visual calculation/branch changed.
+- BallisticPenetration validation: `66 passed, 0 failed`.
+- Release build: `0 warnings, 0 errors` with warnings treated as errors.
+- Physical behavior changed only for low-coefficient child projections that would make EFT's fixed-step drag integration reverse velocity; no trajectory speed clamp, damage, penetration, fragmentation, collision-outcome, armor, gore, or visual branch changed.
 
 ## Deployment Paths and Hashes
 - BallisticPenetration install path: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`
@@ -106,8 +114,8 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Launch SPT and perform a field-report smoke test.
-- The known multilayer velocity defect remains unresolved. No projectile physics changes are authorized.
+- Deploy this commit's Release DLL through the rollback-safe local development procedure, then run a controlled target-spall and multilayer field-report smoke test.
+- Confirm collision observed/resolved pairs, runtime-error aggregation, binding context fields, and absence of `numeric-runaway` before considering GitHub Test 2 release publication.
 
 ## Verified Lifecycle Diagnostics Deployment
 - Deployment date/time: 2026-08-19 09:07:26 CDT.

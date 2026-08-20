@@ -26,6 +26,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
         private static readonly object Gate = new object();
         private static readonly Queue<string> RecentProjectileIdentities = new Queue<string>();
+        private static readonly FieldReportRuntimeErrorAccumulator RuntimeErrors =
+            new FieldReportRuntimeErrorAccumulator();
         private static FieldReportRecorder? _recorder;
         private static string _sessionId = string.Empty;
         private static int _markerSequence;
@@ -146,6 +148,51 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
         }
 
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Runtime-error reporting must never replace the original failure.")]
+        internal static void RecordRuntimeError(string source, Exception exception)
+        {
+            if (exception == null)
+            {
+                return;
+            }
+
+            try
+            {
+                lock (Gate)
+                {
+                    if (_recorder?.IsEnabled != true)
+                    {
+                        return;
+                    }
+
+                    FieldReportRuntimeErrorSnapshot snapshot = RuntimeErrors.Capture(
+                        source,
+                        exception,
+                        DateTimeOffset.Now);
+                    if (snapshot.IncludeFullDetail)
+                    {
+                        _recorder.Record(CreateRuntimeErrorRecord("runtime-error", snapshot, true), true);
+                    }
+                    else if (FieldReportRuntimeErrorAccumulator.ShouldEmitAggregate(
+                        snapshot.OccurrenceCount))
+                    {
+                        _recorder.Record(
+                            CreateRuntimeErrorRecord("runtime-error-aggregate", snapshot, false),
+                            true);
+                    }
+                }
+            }
+            catch (Exception reportingException)
+            {
+                DisableAfterProducerError(
+                    "Field report runtime-error recording failed",
+                    reportingException);
+            }
+        }
+
         internal static string CreateProfileAlias(string? rawIdentity)
         {
             if (string.IsNullOrWhiteSpace(rawIdentity))
@@ -232,6 +279,31 @@ namespace BallisticPenetration.Runtime.Diagnostics
             FieldReportRecorder? recorder;
             lock (Gate)
             {
+                if (_recorder?.IsEnabled == true)
+                {
+                    IReadOnlyList<FieldReportRuntimeErrorSnapshot> totals =
+                        RuntimeErrors.SnapshotTotals();
+                    for (int index = 0; index < totals.Count; index++)
+                    {
+                        try
+                        {
+                            _recorder.Record(
+                                CreateRuntimeErrorRecord(
+                                    "runtime-error-summary",
+                                    totals[index],
+                                    false),
+                                true);
+                        }
+                        catch (Exception exception)
+                        {
+                            LogRecorderError(
+                                "Field report runtime-error summary failed",
+                                exception);
+                            break;
+                        }
+                    }
+                }
+
                 recorder = _recorder;
                 _recorder = null;
             }
@@ -252,8 +324,35 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     _sessionId = string.Empty;
                     _markerSequence = 0;
                     _lastMarkerAt = double.NegativeInfinity;
+                    RuntimeErrors.Clear();
                 }
             }
+        }
+
+        private static FieldReportRecord CreateRuntimeErrorRecord(
+            string eventName,
+            FieldReportRuntimeErrorSnapshot snapshot,
+            bool includeFullDetail)
+        {
+            var fields = new List<KeyValuePair<string, object?>>
+            {
+                Field("source", snapshot.Source),
+                Field("utcTimestamp", snapshot.LastTimestamp.UtcDateTime.ToString("O")),
+                Field("localTimestamp", snapshot.LastTimestamp.ToString("O")),
+                Field("exceptionType", snapshot.ExceptionType),
+                Field("hResult", snapshot.HResult),
+                Field("stackFingerprint", snapshot.StackFingerprint),
+                Field("occurrenceCount", snapshot.OccurrenceCount),
+                Field("firstUtcTimestamp", snapshot.FirstTimestamp.UtcDateTime.ToString("O")),
+                Field("lastUtcTimestamp", snapshot.LastTimestamp.UtcDateTime.ToString("O"))
+            };
+            if (includeFullDetail)
+            {
+                fields.Add(Field("sanitizedMessage", snapshot.SanitizedMessage));
+                fields.Add(Field("topMethods", snapshot.TopMethods));
+            }
+
+            return new FieldReportRecord(eventName, true, fields);
         }
 
         private static FieldReportRecord BuildSessionStart(PluginConfiguration configuration)

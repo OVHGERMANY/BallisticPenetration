@@ -57,7 +57,9 @@ namespace BallisticPenetration.Core.Diagnostics
             string colliderDescriptor,
             double? distanceTravelled,
             double? approximateShooterToImpactDistance,
-            string replacementRelationship)
+            string replacementRelationship,
+            bool shotBindingMatched,
+            string contextSource)
         {
             EventName = eventName ?? string.Empty;
             Timestamp = timestamp;
@@ -108,6 +110,8 @@ namespace BallisticPenetration.Core.Diagnostics
             DistanceTravelled = distanceTravelled;
             ApproximateShooterToImpactDistance = approximateShooterToImpactDistance;
             ReplacementRelationship = replacementRelationship ?? string.Empty;
+            ShotBindingMatched = shotBindingMatched;
+            ContextSource = contextSource ?? string.Empty;
         }
 
         internal string EventName { get; }
@@ -162,6 +166,8 @@ namespace BallisticPenetration.Core.Diagnostics
         internal double? DistanceTravelled { get; }
         internal double? ApproximateShooterToImpactDistance { get; }
         internal string ReplacementRelationship { get; }
+        internal bool ShotBindingMatched { get; }
+        internal string ContextSource { get; }
 
         internal FieldReportRecord ToRecord(bool critical = false)
         {
@@ -221,7 +227,9 @@ namespace BallisticPenetration.Core.Diagnostics
                     Field("colliderDescriptor", EmptyToNull(ColliderDescriptor)),
                     Field("distanceTravelled", DistanceTravelled),
                     Field("approximateShooterToImpactDistance", ApproximateShooterToImpactDistance),
-                    Field("replacementRelationship", EmptyToNull(ReplacementRelationship))
+                    Field("replacementRelationship", EmptyToNull(ReplacementRelationship)),
+                    Field("shotBindingMatched", ShotBindingMatched),
+                    Field("contextSource", ContextSource)
                 });
         }
 

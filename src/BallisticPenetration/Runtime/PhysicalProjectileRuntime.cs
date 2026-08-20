@@ -95,6 +95,14 @@ namespace BallisticPenetration.Runtime
                 return PhysicalBoundFlightResult.NotBound;
             }
 
+            if (PhysicalProjectileLifecycleDiagnostics.RecordNumericRunawayIfPresent(
+                    shot,
+                    binding,
+                    "host-flight-reconciliation"))
+            {
+                return PhysicalBoundFlightResult.Rejected;
+            }
+
             var flightInput = new PhysicalFlightStateInput
             {
                 State = binding.State,

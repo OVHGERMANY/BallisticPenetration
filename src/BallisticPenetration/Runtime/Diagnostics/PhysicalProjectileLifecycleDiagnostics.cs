@@ -24,8 +24,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
         private static readonly PhysicalProjectileLifecycleTracker LifecycleTracker =
             new PhysicalProjectileLifecycleTracker(TerminalTombstoneCapacity);
         private static readonly object CollisionLogLock = new object();
-        private static readonly Dictionary<string, HashSet<(string CollisionIdentity, string Phase)>> CollisionLogByProjectile
-            = new Dictionary<string, HashSet<(string, string)>>(StringComparer.Ordinal);
+        private static readonly PhysicalCollisionEventDeduplicator CollisionDeduplicator =
+            new PhysicalCollisionEventDeduplicator();
+        private static readonly HashSet<string> NumericRunawayStages =
+            new HashSet<string>(StringComparer.Ordinal);
         private static int _recordCount;
         private static int _limitReported;
         private static bool _shutdownStarted;
@@ -109,6 +111,75 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 targetWasAlreadyDead,
                 targetSurfaceIdentity,
                 collisionRecord);
+        }
+
+        internal static bool RecordNumericRunawayIfPresent(
+            Shot shot,
+            PhysicalShotBinding binding,
+            string stage)
+        {
+            if (shot == null || binding == null || !binding.Matches(shot))
+            {
+                return false;
+            }
+
+            PhysicalProjectileState state = binding.State;
+            PhysicalVector3 position = ToPhysical(shot.CurrentPosition);
+            PhysicalVector3 hostVelocity = ToPhysical(shot.CurrentVelocity);
+            if (!PhysicalNumericRunawayDetector.IsRunaway(
+                    state.TranslationalKineticEnergyJoules,
+                    state.RetainedMassKilograms,
+                    hostVelocity,
+                    position))
+            {
+                return false;
+            }
+
+            string exactStage = string.IsNullOrWhiteSpace(stage) ? "unknown" : stage;
+            string dedupeKey = state.ProjectileId + "|" + exactStage;
+            lock (CollisionLogLock)
+            {
+                if (!NumericRunawayStages.Add(dedupeKey))
+                {
+                    return true;
+                }
+            }
+
+            try
+            {
+                PhysicalCollisionRecord? lastCollision = state.CollisionHistory.Count > 0
+                    ? state.CollisionHistory[state.CollisionHistory.Count - 1]
+                    : null;
+                FieldReportRuntime.RecordEvent(
+                    "numeric-runaway",
+                    true,
+                    Field("projectileIdentity", state.ProjectileId),
+                    Field("rootIdentity", state.RootShotId),
+                    Field("collisionIdentity", lastCollision?.CollisionId),
+                    Field("massKilograms", state.RetainedMassKilograms),
+                    Field("energyJoules", state.TranslationalKineticEnergyJoules),
+                    Field("diameterMetres", state.EquivalentDiameterMetres),
+                    Field("assignedPhysicalSpeed", state.SpeedMetresPerSecond),
+                    Field("eftBallisticCoefficient", binding.EftBallisticCoefficient),
+                    Field("incomingVelocity", lastCollision?.IncomingVelocityMetresPerSecond),
+                    Field("outgoingVelocity", lastCollision?.OutgoingVelocityMetresPerSecond),
+                    Field("projectedVelocity", ToPhysical(binding.CreationVelocity)),
+                    Field("hostMeasuredVelocity", hostVelocity),
+                    Field("hostMeasuredSpeed", hostVelocity.Magnitude),
+                    Field("position", position),
+                    Field("deltaTimeSeconds", Math.Max(
+                        0d,
+                        Time.realtimeSinceStartupAsDouble - binding.CreationTimeSeconds)),
+                    Field("material", lastCollision?.MaterialClass.ToString()),
+                    Field("outcome", lastCollision?.Outcome.ToString()),
+                    Field("stage", exactStage));
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogHookFailure("Physical numeric runaway diagnostics", exception);
+            }
+
+            return true;
         }
 
         internal static void RecordRemoval(
@@ -211,7 +282,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
                 lock (CollisionLogLock)
                 {
-                    CollisionLogByProjectile.Clear();
+                    CollisionDeduplicator.Clear();
+                    NumericRunawayStages.Clear();
                 }
             }
         }
@@ -252,11 +324,13 @@ namespace BallisticPenetration.Runtime.Diagnostics
             {
                 PhysicalProjectileState state = binding.State;
                 double now = Time.realtimeSinceStartupAsDouble;
+                bool shotBindingMatched = shot != null && binding.Matches(shot);
                 bool isCanonicalTerminal = TryResolveCanonicalTerminalReason(
                     eventName,
                     reason,
                     out PhysicalLifecycleTerminalReason attemptedTerminalReason);
                 PhysicalLifecycleTerminalAttempt? terminalAttempt = null;
+                PhysicalLifecycleSnapshot? contextSnapshot = null;
                 bool creationRegistered = true;
 
                 lock (LifecycleLock)
@@ -281,6 +355,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
                                 ? ResolveCollisionOrdinal(recordSequence.Value)
                                 : null);
                     }
+
+                    LifecycleTracker.TryGetActiveSnapshot(
+                        state.ProjectileId,
+                        out contextSnapshot);
 
                     if (isCanonicalTerminal)
                     {
@@ -371,8 +449,18 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 bool isResolved = resolutionKnown ?? false;
                 bool isContinued = continued ?? false;
                 bool isReplaced = replaced ?? false;
-                Vector3 currentPosition = shot != null ? shot.CurrentPosition : binding.CreationPosition;
-                Vector3 currentVelocity = shot != null ? shot.CurrentVelocity : Vector3.zero;
+                PhysicalLifecycleReportContext reportContext =
+                    PhysicalLifecycleReportContext.Resolve(
+                        shotBindingMatched,
+                        shotBindingMatched && shot != null
+                            ? ToPhysical(shot.CurrentPosition)
+                            : PhysicalVector3.Zero,
+                        shotBindingMatched && shot != null
+                            ? ToPhysical(shot.CurrentVelocity)
+                            : PhysicalVector3.Zero,
+                        contextSnapshot,
+                        ToPhysical(binding.CreationPosition),
+                        ToPhysical(binding.CreationVelocity));
                 bool ballisticTerminal = ResolveBallisticTerminalState(
                     eventName,
                     reason,
@@ -410,8 +498,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     phase,
                     isResolved,
                     now,
-                    currentPosition,
-                    currentVelocity,
+                    reportContext.Position,
+                    reportContext.Velocity,
                     incomingPhysical,
                     outgoingPhysical,
                     outcome,
@@ -423,7 +511,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     lifecycleTerminal,
                     lifecycleEndReason,
                     targetWasAlreadyDead ?? false,
-                    targetSurfaceIdentity);
+                    targetSurfaceIdentity,
+                    reportContext.ShotBindingMatched,
+                    reportContext.ContextSource);
 
                 if (fieldRecordingEnabled)
                 {
@@ -490,8 +580,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
             string? phase,
             bool resolutionKnown,
             double now,
-            Vector3 currentPosition,
-            Vector3 currentVelocity,
+            PhysicalVector3 currentPosition,
+            PhysicalVector3 currentVelocity,
             PhysicalVector3 incomingVelocity,
             PhysicalVector3 outgoingVelocity,
             string collisionOutcome,
@@ -503,11 +593,14 @@ namespace BallisticPenetration.Runtime.Diagnostics
             bool lifecycleTerminal,
             string lifecycleEndReason,
             bool targetWasAlreadyDead,
-            string? targetSurface)
+            string? targetSurface,
+            bool shotBindingMatched,
+            string contextSource)
         {
             PhysicalProjectileState state = binding.State;
-            AmmoTemplate? ammunition = shot?.Ammo?.Template as AmmoTemplate;
-            object? weapon = shot?.Weapon;
+            Shot? safeShot = shotBindingMatched ? shot : null;
+            AmmoTemplate? ammunition = safeShot?.Ammo?.Template as AmmoTemplate;
+            object? weapon = safeShot?.Weapon;
             object? weaponTemplate = ReadProperty(weapon, "Template");
             string ammunitionTemplateId = ammunition?.StringId ?? string.Empty;
             string ammunitionName = ammunition?.Name ?? string.Empty;
@@ -519,24 +612,26 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
 
             string weaponDisplayName = ReadStringProperty(weaponTemplate, "Name");
-            bool? localPlayerShooter = ReadNullableBoolProperty(shot?.Player, "IsYourPlayer");
-            string shooterAlias = FieldReportRuntime.CreateProfileAlias(shot?.PlayerProfileID);
-            PhysicalVector3? shooterPosition = shot == null
+            bool? localPlayerShooter = ReadNullableBoolProperty(safeShot?.Player, "IsYourPlayer");
+            string shooterAlias = FieldReportRuntime.CreateProfileAlias(safeShot?.PlayerProfileID);
+            PhysicalVector3? shooterPosition = safeShot == null
                 ? null
-                : ToPhysical(shot.StartPosition);
-            Vector3 approximateOrigin = shot?.StartPosition ?? binding.CreationPosition;
+                : ToPhysical(safeShot.StartPosition);
+            PhysicalVector3 approximateOrigin = safeShot == null
+                ? ToPhysical(binding.CreationPosition)
+                : ToPhysical(safeShot.StartPosition);
             PhysicalVector3 displacement = new PhysicalVector3(
-                currentPosition.x - approximateOrigin.x,
-                currentPosition.y - approximateOrigin.y,
-                currentPosition.z - approximateOrigin.z);
+                currentPosition.X - approximateOrigin.X,
+                currentPosition.Y - approximateOrigin.Y,
+                currentPosition.Z - approximateOrigin.Z);
             double approximateDistance = displacement.Magnitude;
-            double? distanceTravelled = ReadNullableNonNegativeDoubleProperty(shot, "Distance");
-            string targetCategory = shot?.HittedBallisticCollider?.GetType().Name ?? string.Empty;
-            string targetBodyPart = shot?.HittedBallisticCollider is BodyPartCollider bodyPartCollider
+            double? distanceTravelled = ReadNullableNonNegativeDoubleProperty(safeShot, "Distance");
+            string targetCategory = safeShot?.HittedBallisticCollider?.GetType().Name ?? string.Empty;
+            string targetBodyPart = safeShot?.HittedBallisticCollider is BodyPartCollider bodyPartCollider
                 ? bodyPartCollider.BodyPartColliderType.ToString()
                 : string.Empty;
-            string armorContext = ResolveArmorContext(shot);
-            string colliderDescriptor = shot?.HitCollider?.GetType().Name ?? string.Empty;
+            string armorContext = ResolveArmorContext(safeShot);
+            string colliderDescriptor = safeShot?.HitCollider?.GetType().Name ?? string.Empty;
             string replacementRelationship = string.IsNullOrWhiteSpace(state.SourceCollisionId)
                 ? string.Empty
                 : "source-collision:" + state.SourceCollisionId;
@@ -557,8 +652,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 lifecycleTerminal ? now : 0d,
                 ToPhysical(binding.CreationPosition),
                 ToPhysical(binding.CreationVelocity),
-                ToPhysical(currentPosition),
-                ToPhysical(currentVelocity),
+                currentPosition,
+                currentVelocity,
                 collisionIdentity ?? string.Empty,
                 materialId,
                 materialClass,
@@ -573,7 +668,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 targetWasAlreadyDead,
                 targetSurface ?? string.Empty,
                 state.TerminalState.ToString(),
-                shot?.BulletState.ToString() ?? "released",
+                safeShot?.BulletState.ToString() ?? "released",
                 reason,
                 localPlayerShooter,
                 shooterAlias,
@@ -590,7 +685,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 colliderDescriptor,
                 distanceTravelled,
                 approximateDistance,
-                replacementRelationship);
+                replacementRelationship,
+                shotBindingMatched,
+                contextSource);
         }
 
         private static string ResolveArmorContext(Shot? shot)
@@ -662,8 +759,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
             Shot? shot,
             PhysicalShotBinding binding)
         {
-            Vector3 position = shot != null ? shot.CurrentPosition : binding.CreationPosition;
-            Vector3 velocity = shot != null ? shot.CurrentVelocity : binding.CreationVelocity;
+            bool matched = shot != null && binding.Matches(shot);
+            Vector3 position = matched ? shot!.CurrentPosition : binding.CreationPosition;
+            Vector3 velocity = matched ? shot!.CurrentVelocity : binding.CreationVelocity;
             PhysicalProjectileState state = binding.State;
             PhysicalCollisionRecord? lastCollision = state.CollisionHistory.Count > 0
                 ? state.CollisionHistory[state.CollisionHistory.Count - 1]
@@ -812,16 +910,10 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             lock (CollisionLogLock)
             {
-                if (!CollisionLogByProjectile.TryGetValue(
-                        projectileIdentity,
-                        out HashSet<(string CollisionIdentity, string Phase)>? recordedPhases))
-                {
-                    recordedPhases = new HashSet<(string CollisionIdentity, string Phase)>(
-                        CollisionRecordTupleComparer.Instance);
-                    CollisionLogByProjectile[projectileIdentity] = recordedPhases;
-                }
-
-                return !recordedPhases.Add((collisionIdentity, phase));
+                return !CollisionDeduplicator.TryRecord(
+                    projectileIdentity,
+                    collisionIdentity,
+                    phase);
             }
         }
 
@@ -834,7 +926,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             lock (CollisionLogLock)
             {
-                CollisionLogByProjectile.Remove(projectileIdentity);
+                CollisionDeduplicator.ClearProjectile(projectileIdentity);
             }
         }
 
@@ -897,7 +989,9 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     ? null
                     : snapshot.LastCollisionIdentity),
                 Field("lastCollisionOrdinal", snapshot.LastCollisionOrdinal),
-                Field("removalTimestamp", removalTimestamp));
+                Field("removalTimestamp", removalTimestamp),
+                Field("shotBindingMatched", false),
+                Field("contextSource", "tracker-snapshot"));
             Plugin.Log?.LogWarning(
                 "Physical projectile lifecycle invariant: event=terminal-missing"
                 + ", projectile=" + snapshot.ProjectileIdentity
@@ -1008,26 +1102,5 @@ namespace BallisticPenetration.Runtime.Diagnostics
             return new KeyValuePair<string, object?>(name, value);
         }
 
-        private sealed class CollisionRecordTupleComparer : IEqualityComparer<(string CollisionIdentity, string Phase)>
-        {
-            internal static readonly CollisionRecordTupleComparer Instance = new CollisionRecordTupleComparer();
-
-            public bool Equals(
-                (string CollisionIdentity, string Phase) left,
-                (string CollisionIdentity, string Phase) right)
-            {
-                return string.Equals(
-                    left.CollisionIdentity,
-                    right.CollisionIdentity,
-                    StringComparison.Ordinal)
-                    && string.Equals(left.Phase, right.Phase, StringComparison.Ordinal);
-            }
-
-            public int GetHashCode((string CollisionIdentity, string Phase) obj)
-            {
-                return ((StringComparer.Ordinal.GetHashCode(obj.CollisionIdentity) * 397)
-                        ^ StringComparer.Ordinal.GetHashCode(obj.Phase));
-            }
-        }
     }
 }

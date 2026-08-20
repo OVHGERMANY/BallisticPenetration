@@ -96,11 +96,7 @@ namespace BallisticPenetration
             }
             catch (Exception exception)
             {
-                FieldReportRuntime.RecordEvent(
-                    "runtime-error",
-                    true,
-                    new KeyValuePair<string, object?>("source", "plugin-startup"),
-                    new KeyValuePair<string, object?>("exceptionType", exception.GetType().Name));
+                FieldReportRuntime.RecordRuntimeError("plugin-startup", exception);
                 Logger.LogError(PluginName + " failed to load; its patches were disabled. " + exception);
                 throw;
             }
@@ -150,11 +146,7 @@ namespace BallisticPenetration
                         + exception);
                 }
 
-                FieldReportRuntime.RecordEvent(
-                    "runtime-error",
-                    true,
-                    new KeyValuePair<string, object?>("source", hookName),
-                    new KeyValuePair<string, object?>("exceptionType", exception.GetType().Name));
+                FieldReportRuntime.RecordRuntimeError(hookName, exception);
             }
             catch
             {
