@@ -83,7 +83,18 @@
 ## Deployment Paths and Hashes
 - BallisticPenetration install path: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`
 - Runtime log path: `E:\Games\SPT\BepInEx\LogOutput.log`
-- Current hash state to be filled after verified install.
+- Field-report recorder deployment verified on 2026-08-20 15:26:13 CDT (backup creation timestamp):
+  - Deployed source commit: `fee5e469439ac1616daccf36fa8e95df74a791c2`.
+  - Release DLL source: `C:\Users\jbnel\Projects\BallisticPenetration\src\BallisticPenetration\bin\Release\netstandard2.1\BallisticPenetration.dll`.
+  - Installed DLL destination: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`.
+  - Previous installed DLL: SHA-256 `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`, length `254976` bytes.
+  - Verified backup: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\backup\BallisticPenetration.dll.20260820-151615-pre-field-report.bak`, SHA-256 `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`.
+  - Release and installed DLL: SHA-256 `522B50D701BE9DB47B8300D19E136BCF4B903098D6BFB6DF72BAC43FCA766A92`, length `295424` bytes each.
+  - Build: Release succeeded with 0 warnings and 0 errors.
+  - Validation: `61 passed, 0 failed`.
+  - Expected report directory: `E:\Games\SPT\BepInEx\FieldReports\BallisticPenetration`; it is derived from the active BepInEx root and will be created when the plugin loads.
+  - Default issue-marker key: `F8`.
+  - Field-report assembly evidence is present in the byte-identical Release/installed DLL.
 
 ## HollywoodFX Context
 - Repository: `C:\Users\jbnel\Projects\HollywoodFX`
@@ -95,7 +106,8 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Deploy and hash-verify the field-report build.
+- Launch SPT and perform a field-report smoke test.
+- The known multilayer velocity defect remains unresolved. No projectile physics changes are authorized.
 
 ## Verified Lifecycle Diagnostics Deployment
 - Deployment date/time: 2026-08-19 09:07:26 CDT.

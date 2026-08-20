@@ -5,7 +5,8 @@
 - [x] Implementation complete.
 - [x] Release build succeeds with warnings treated as errors.
 - [x] Validation succeeds: `61 passed, 0 failed`.
-- [ ] Deployment and runtime acceptance are separate next actions.
+- [x] Deployment and SHA-256 verification complete.
+- [ ] Runtime acceptance: launch SPT and perform a field-report smoke test.
 
 ## Objective
 
@@ -88,8 +89,23 @@ Produce one automatic, self-contained, append-only JSONL `.bpreport` per game pr
 - No projectile velocity, trajectory, drag, penetration, damage, fragmentation, collision outcome, target, armor, gore, or visual behavior change.
 - No networking or automatic upload.
 - No HollywoodFX edit.
-- No DLL installation in this milestone.
+- No additional DLL deployment beyond the verified field-report installation recorded below.
+
+## Verified Deployment
+
+- Deployed source commit: `fee5e469439ac1616daccf36fa8e95df74a791c2`.
+- Deployment record timestamp: 2026-08-20 15:26:13 CDT (verified backup creation timestamp).
+- Release plugin DLL: `C:\Users\jbnel\Projects\BallisticPenetration\src\BallisticPenetration\bin\Release\netstandard2.1\BallisticPenetration.dll`.
+- Installed DLL: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`.
+- Previous installed artifact: SHA-256 `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`, length `254976` bytes.
+- Backup: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\backup\BallisticPenetration.dll.20260820-151615-pre-field-report.bak`, SHA-256 `E27865D7CDF414B8416463451C5F118386CA065D2D2792DB39947417B16E8249`.
+- Release and installed artifact: SHA-256 `522B50D701BE9DB47B8300D19E136BCF4B903098D6BFB6DF72BAC43FCA766A92`, length `295424` bytes each.
+- Build result: Release succeeded with 0 warnings and 0 errors.
+- Validation result: `61 passed, 0 failed`.
+- Expected field-report directory: `E:\Games\SPT\BepInEx\FieldReports\BallisticPenetration` (created when the plugin loads).
+- Default issue-marker key: `F8`.
+- The known multilayer velocity defect remains unresolved. No projectile physics changes are authorized.
 
 ## Exact Next Action
 
-Deploy and hash-verify the field-report build.
+Launch SPT and perform a field-report smoke test.
