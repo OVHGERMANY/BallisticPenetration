@@ -51,6 +51,7 @@ namespace BallisticPenetration
             try
             {
                 EnsureExactSptCoreVersion();
+                FieldReportRuntime.Initialize(Configuration);
 
                 // Resolve and verify every signature before any Harmony mutation.
                 MethodInfo handleCollisionTarget = TargetMethodResolver.ResolveHandleCollision();
@@ -95,6 +96,11 @@ namespace BallisticPenetration
             }
             catch (Exception exception)
             {
+                FieldReportRuntime.RecordEvent(
+                    "runtime-error",
+                    true,
+                    new KeyValuePair<string, object?>("source", "plugin-startup"),
+                    new KeyValuePair<string, object?>("exceptionType", exception.GetType().Name));
                 Logger.LogError(PluginName + " failed to load; its patches were disabled. " + exception);
                 throw;
             }
@@ -107,6 +113,7 @@ namespace BallisticPenetration
             PhysicalProjectileVisualRuntime.Shutdown();
             // Remove the optional overlay and trace objects.
             DiagnosticsRuntime.Shutdown();
+            FieldReportRuntime.Shutdown();
         }
 
         private void Update()
@@ -119,6 +126,11 @@ namespace BallisticPenetration
             // Unity objects are created from this main-thread callback.
             PhysicalProjectileVisualRuntime.UpdatePresentation();
             DiagnosticsRuntime.UpdatePresentation();
+            PluginConfiguration? configuration = Configuration;
+            if (configuration != null)
+            {
+                FieldReportRuntime.UpdateIssueMarker(configuration);
+            }
         }
 
         [SuppressMessage(
@@ -137,6 +149,12 @@ namespace BallisticPenetration
                         + " failed; BallisticPenetration will make no further changes to this shot. "
                         + exception);
                 }
+
+                FieldReportRuntime.RecordEvent(
+                    "runtime-error",
+                    true,
+                    new KeyValuePair<string, object?>("source", hookName),
+                    new KeyValuePair<string, object?>("exceptionType", exception.GetType().Name));
             }
             catch
             {

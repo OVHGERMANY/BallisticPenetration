@@ -4,7 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Text.Json;
 using BallisticPenetration.Core;
 using BallisticPenetration.Core.Diagnostics;
@@ -138,6 +141,19 @@ namespace BallisticPenetration.Validation
             Run(
                 "Bounded physical lifecycle terminal diagnostics",
                 ValidatePhysicalLifecycleTerminalDiagnostics);
+            Run("Field report session-start JSON", ValidateFieldReportSessionStart);
+            Run("Field report lifecycle correlation serialization", ValidateFieldReportLifecycleSerialization);
+            Run("Field report concurrent JSONL ordering", ValidateFieldReportConcurrency);
+            Run("Field report issue-marker flush", ValidateFieldReportIssueMarkerFlush);
+            Run("Field report normal shutdown finalization", ValidateFieldReportShutdownFinalization);
+            Run("Field report stale partial crash recovery", ValidateFieldReportCrashRecovery);
+            Run("Field report exceptions remain isolated", ValidateFieldReportExceptionIsolation);
+            Run("Disabled field recorder creates no report", ValidateDisabledFieldRecorder);
+            Run("Field report queue overflow accounting", ValidateFieldReportQueueOverflow);
+            Run("Field report completed-file retention", ValidateFieldReportRetention);
+            Run("Field report active partial retention protection", ValidateFieldReportActivePartialProtection);
+            Run("Field report size truncation and critical eligibility", ValidateFieldReportTruncation);
+            Run("Field report privacy path exclusions", ValidateFieldReportPrivacy);
             Run("Projectile and target-spall conservation", ValidatePhysicalConservation);
             Run("Deterministic projectile random stream", ValidateDeterministicProjectileRandom);
             Run("Physical child seeds stay inside the host random table", ValidatePhysicalHostRandomSeed);
@@ -1303,6 +1319,488 @@ namespace BallisticPenetration.Validation
                 new PhysicalVector3(400d, 0d, 0d),
                 string.Empty,
                 0);
+        }
+
+        private static void ValidateFieldReportSessionStart()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory);
+                recorder.Stop();
+                string reportPath = GetSingleCompletedFieldReport(directory);
+                string[] lines = File.ReadAllLines(reportPath);
+                AssertTrue("field report contains records", lines.Length >= 2);
+                using JsonDocument first = JsonDocument.Parse(lines[0]);
+                AssertEqual("first field report event", "session-start", first.RootElement.GetProperty("event").GetString());
+                AssertEqual("field report schema version", FieldReportRecord.CurrentSchemaVersion, first.RootElement.GetProperty("schemaVersion").GetInt32());
+                AssertEqual("first report sequence", 1L, first.RootElement.GetProperty("reportSequence").GetInt64());
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportLifecycleSerialization()
+        {
+            FieldReportLifecycleEventSnapshot snapshot = CreateFieldReportLifecycleSnapshot("collision-resolved");
+            string json = snapshot.ToRecord().ToJsonLine(17L);
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+            AssertEqual("lifecycle report sequence", 17L, root.GetProperty("reportSequence").GetInt64());
+            AssertEqual("lifecycle record sequence retained", 4, root.GetProperty("recordSequence").GetInt32());
+            AssertEqual("lifecycle collision ordinal retained", 4, root.GetProperty("collisionOrdinal").GetInt32());
+            AssertEqual("lifecycle collision identity retained", "collision-4", root.GetProperty("collisionIdentity").GetString());
+            AssertEqual("lifecycle root identity retained", "root-projectile-1", root.GetProperty("rootIdentity").GetString());
+            AssertEqual("lifecycle incoming speed retained", 900d, root.GetProperty("incomingSpeed").GetDouble());
+            AssertEqual("lifecycle outgoing speed retained", 600d, root.GetProperty("outgoingSpeed").GetDouble());
+            AssertEqual("lifecycle replacement relationship retained", "source-collision:collision-3", root.GetProperty("replacementRelationship").GetString());
+        }
+
+        private static void ValidateFieldReportConcurrency()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory, queueCapacity: 4096);
+                const int workers = 8;
+                const int recordsPerWorker = 100;
+                var tasks = new Task[workers];
+                for (int worker = 0; worker < workers; worker++)
+                {
+                    int capturedWorker = worker;
+                    tasks[worker] = Task.Run(delegate
+                    {
+                        for (int index = 0; index < recordsPerWorker; index++)
+                        {
+                            recorder.Record(
+                                new FieldReportRecord(
+                                    "concurrent-event",
+                                    false,
+                                    new[]
+                                    {
+                                        FieldReportField("worker", capturedWorker),
+                                        FieldReportField("index", index)
+                                    }));
+                        }
+                    });
+                }
+
+                Task.WaitAll(tasks);
+                recorder.Stop();
+                List<JsonElement> records = ReadFieldReportJson(GetSingleCompletedFieldReport(directory));
+                long previous = 0L;
+                for (int index = 0; index < records.Count; index++)
+                {
+                    long current = records[index].GetProperty("reportSequence").GetInt64();
+                    AssertTrue("concurrent report sequence increases at " + index, current > previous);
+                    previous = current;
+                }
+
+                AssertEqual("all concurrent records remained valid JSONL", workers * recordsPerWorker + 2, records.Count);
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportIssueMarkerFlush()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory, flushSeconds: 30d);
+                bool accepted = recorder.Record(
+                    new FieldReportRecord(
+                        "issue-marker",
+                        true,
+                        new[] { FieldReportField("markerSequence", 1) }),
+                    true);
+                AssertTrue("issue marker accepted", accepted);
+                bool flushed = SpinWait.SpinUntil(
+                    delegate
+                    {
+                        try
+                        {
+                            return ReadActiveFieldReport(recorder.PartialPath).Contains("\"event\":\"issue-marker\"", StringComparison.Ordinal);
+                        }
+                        catch (IOException)
+                        {
+                            return false;
+                        }
+                    },
+                    TimeSpan.FromSeconds(3d));
+                AssertTrue("issue marker promptly flushed", flushed);
+                recorder.Stop();
+                AssertTrue("marked report filename identifies marker", GetSingleCompletedFieldReport(directory).EndsWith("-marked.bpreport", StringComparison.Ordinal));
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportShutdownFinalization()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory);
+                string partialPath = recorder.PartialPath;
+                recorder.Stop();
+                AssertTrue("normal shutdown removes partial filename", !File.Exists(partialPath));
+                string reportPath = GetSingleCompletedFieldReport(directory);
+                List<JsonElement> records = ReadFieldReportJson(reportPath);
+                JsonElement end = records[records.Count - 1];
+                AssertEqual("normal shutdown writes session-end", "session-end", end.GetProperty("event").GetString());
+                AssertEqual("session-end final length is exact", new FileInfo(reportPath).Length, end.GetProperty("finalReportLength").GetInt64());
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportCrashRecovery()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                string partial = Path.Combine(directory, "20260820T120000Z-crashed.partial.bpreport");
+                const string content = "{\"event\":\"session-start\"}\n{\"event\":\"created\"}\n";
+                File.WriteAllText(partial, content);
+                IReadOnlyList<string> recovered = FieldReportRecorder.RecoverStalePartialReports(directory);
+                AssertEqual("one stale partial recovered", 1, recovered.Count);
+                AssertTrue("stale partial is preserved under recovered name", Path.GetFileName(recovered[0]).StartsWith("recovered-crash-", StringComparison.Ordinal));
+                AssertEqual("crash recovery preserves exact bytes", content, File.ReadAllText(recovered[0]));
+                AssertTrue("original stale partial renamed", !File.Exists(partial));
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportExceptionIsolation()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                string occupiedPath = Path.Combine(directory, "occupied");
+                File.WriteAllText(occupiedPath, "not a directory");
+                var options = CreateFieldReportOptions(occupiedPath);
+                FieldReportRecorder recorder = FieldReportRecorder.Start(
+                    options,
+                    CreateFieldReportSessionStart());
+                AssertTrue("initialization exception disables only recorder", !recorder.IsEnabled);
+                AssertTrue("disabled recorder rejects later calls without throwing", !recorder.Record(new FieldReportRecord("created", false)));
+                recorder.Stop();
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateDisabledFieldRecorder()
+        {
+            string parent = Path.Combine(Path.GetTempPath(), "BallisticPenetration-disabled-" + Guid.NewGuid().ToString("N"));
+            FieldReportRecorder? recorder = FieldReportRecorder.StartIfEnabled(
+                false,
+                CreateFieldReportOptions(parent),
+                CreateFieldReportSessionStart());
+            AssertTrue("disabled recorder returns no instance", recorder == null);
+            AssertTrue("disabled recorder creates no report directory", !Directory.Exists(parent));
+        }
+
+        private static void ValidateFieldReportQueueOverflow()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory, queueCapacity: 1);
+                string payload = new string('x', 4096);
+                Parallel.For(
+                    0,
+                    2000,
+                    index => recorder.Record(
+                        new FieldReportRecord(
+                            "created",
+                            false,
+                            new[]
+                            {
+                                FieldReportField("index", index),
+                                FieldReportField("payload", payload)
+                            })));
+                recorder.Stop();
+                JsonElement end = ReadFieldReportJson(GetSingleCompletedFieldReport(directory)).Last();
+                AssertTrue("queue overflow is counted", end.GetProperty("droppedEventCount").GetInt64() > 0L);
+                AssertEqual("queue high-water mark is bounded", 1, end.GetProperty("writerQueueHighWaterMark").GetInt32());
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportRetention()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                string oldest = Path.Combine(directory, "20260818T120000Z-oldest.bpreport");
+                string middle = Path.Combine(directory, "20260819T120000Z-middle.bpreport");
+                string newest = Path.Combine(directory, "20260820T120000Z-newest.bpreport");
+                string unknown = Path.Combine(directory, "tester-notes.bpreport");
+                File.WriteAllText(oldest, "oldest");
+                File.WriteAllText(middle, "middle");
+                File.WriteAllText(newest, "newest");
+                File.WriteAllText(unknown, "unknown");
+                File.SetLastWriteTimeUtc(oldest, new DateTime(2026, 8, 18, 12, 0, 0, DateTimeKind.Utc));
+                File.SetLastWriteTimeUtc(middle, new DateTime(2026, 8, 19, 12, 0, 0, DateTimeKind.Utc));
+                File.SetLastWriteTimeUtc(newest, new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc));
+                IReadOnlyList<string> deleted = FieldReportRecorder.ApplyRetention(directory, 1, long.MaxValue);
+                AssertEqual("oldest owned completed reports deleted", 2, deleted.Count);
+                AssertTrue("newest owned completed report retained", File.Exists(newest));
+                AssertTrue("unknown report file retained", File.Exists(unknown));
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportActivePartialProtection()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                string active = Path.Combine(directory, "20260820T120000Z-active.partial.bpreport");
+                string completed = Path.Combine(directory, "20260819T120000Z-complete.bpreport");
+                File.WriteAllText(active, "active");
+                File.WriteAllText(completed, "complete");
+                FieldReportRecorder.ApplyRetention(directory, 1, 1L);
+                AssertTrue("active partial is never deleted by retention", File.Exists(active));
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportTruncation()
+        {
+            string directory = CreateFieldReportTemporaryDirectory();
+            try
+            {
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory, maximumFileBytes: 8192L);
+                recorder.Record(
+                    new FieldReportRecord(
+                        "created",
+                        false,
+                        new[] { FieldReportField("payload", new string('x', 9000)) }));
+                recorder.Record(
+                    new FieldReportRecord(
+                        "issue-marker",
+                        true,
+                        new[] { FieldReportField("markerSequence", 1) }),
+                    true);
+                recorder.Stop();
+                List<JsonElement> records = ReadFieldReportJson(GetSingleCompletedFieldReport(directory));
+                AssertTrue("size limit emits report-truncated", records.Any(record => record.GetProperty("event").GetString() == "report-truncated"));
+                AssertTrue("critical marker remains eligible after truncation", records.Any(record => record.GetProperty("event").GetString() == "issue-marker"));
+                AssertTrue("truncated report remains within maximum", new FileInfo(GetSingleCompletedFieldReport(directory)).Length <= 8192L);
+            }
+            finally
+            {
+                DeleteFieldReportTemporaryDirectory(directory);
+            }
+        }
+
+        private static void ValidateFieldReportPrivacy()
+        {
+            string privateToken = "private-user-" + Guid.NewGuid().ToString("N");
+            string directory = Path.Combine(Path.GetTempPath(), privateToken, "reports");
+            try
+            {
+                Directory.CreateDirectory(directory);
+                using FieldReportRecorder recorder = CreateFieldReportRecorder(directory);
+                recorder.Stop();
+                string contents = File.ReadAllText(GetSingleCompletedFieldReport(directory));
+                AssertTrue("report omits full personal report path", !contents.Contains(directory, StringComparison.OrdinalIgnoreCase));
+                AssertTrue("report omits username-like directory token", !contents.Contains(privateToken, StringComparison.OrdinalIgnoreCase));
+                AssertTrue("report omits Windows username", string.IsNullOrWhiteSpace(Environment.UserName)
+                    || !contents.Contains(Environment.UserName, StringComparison.OrdinalIgnoreCase));
+                AssertTrue("report omits computer name", string.IsNullOrWhiteSpace(Environment.MachineName)
+                    || !contents.Contains(Environment.MachineName, StringComparison.OrdinalIgnoreCase));
+                foreach (string line in File.ReadLines(GetSingleCompletedFieldReport(directory)))
+                {
+                    using JsonDocument document = JsonDocument.Parse(line);
+                    AssertEqual("privacy report line is a JSON object", JsonValueKind.Object, document.RootElement.ValueKind);
+                }
+            }
+            finally
+            {
+                string root = Directory.GetParent(directory)?.FullName ?? directory;
+                DeleteFieldReportTemporaryDirectory(root);
+            }
+        }
+
+        private static FieldReportLifecycleEventSnapshot CreateFieldReportLifecycleSnapshot(string eventName)
+        {
+            return new FieldReportLifecycleEventSnapshot(
+                eventName,
+                DateTimeOffset.UtcNow,
+                "projectile-1",
+                "root-projectile-1",
+                "IntactProjectile",
+                0,
+                0,
+                4,
+                4,
+                "resolved",
+                true,
+                1d,
+                2d,
+                new PhysicalVector3(0d, 0d, 0d),
+                new PhysicalVector3(0d, 0d, 1000d),
+                new PhysicalVector3(0d, 0d, 10d),
+                new PhysicalVector3(0d, 0d, 600d),
+                "collision-4",
+                "armor-steel",
+                "ArmoredSteel",
+                new PhysicalVector3(0d, 0d, 900d),
+                new PhysicalVector3(0d, 0d, 600d),
+                "Penetrated",
+                true,
+                true,
+                false,
+                false,
+                "none",
+                false,
+                "surface-1",
+                "Flying",
+                "Flying",
+                "resolved-continuation",
+                true,
+                "profile-a1b2c3d4",
+                "weapon-template",
+                "Test Weapon",
+                "ammo-template",
+                "Test Ammunition",
+                "CaliberTest",
+                1000d,
+                new PhysicalVector3(0d, 0d, 0d),
+                "ArmorPlateCollider",
+                "Chest",
+                "body-armor",
+                "BoxCollider:armor",
+                10d,
+                10d,
+                "source-collision:collision-3");
+        }
+
+        private static FieldReportRecorder CreateFieldReportRecorder(
+            string directory,
+            int queueCapacity = 128,
+            double flushSeconds = 0.05d,
+            long maximumFileBytes = 1024L * 1024L)
+        {
+            return FieldReportRecorder.Start(
+                CreateFieldReportOptions(directory, queueCapacity, flushSeconds, maximumFileBytes),
+                CreateFieldReportSessionStart());
+        }
+
+        private static FieldReportOptions CreateFieldReportOptions(
+            string directory,
+            int queueCapacity = 128,
+            double flushSeconds = 0.05d,
+            long maximumFileBytes = 1024L * 1024L)
+        {
+            return new FieldReportOptions(
+                directory,
+                Guid.NewGuid().ToString("N").Substring(0, 16),
+                queueCapacity,
+                TimeSpan.FromSeconds(flushSeconds),
+                20,
+                16L * 1024L * 1024L,
+                maximumFileBytes);
+        }
+
+        private static FieldReportRecord CreateFieldReportSessionStart()
+        {
+            return new FieldReportRecord(
+                "session-start",
+                true,
+                new[]
+                {
+                    FieldReportField("sessionId", "validation-session"),
+                    FieldReportField("runningDllFileName", "BallisticPenetration.dll"),
+                    FieldReportField("runningDllSha256", new string('A', 64)),
+                    FieldReportField("runningDllLength", 123456L)
+                });
+        }
+
+        private static string CreateFieldReportTemporaryDirectory()
+        {
+            string path = Path.Combine(
+                Path.GetTempPath(),
+                "BallisticPenetration.FieldReports.Validation",
+                Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        private static void DeleteFieldReportTemporaryDirectory(string directory)
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+
+        private static string GetSingleCompletedFieldReport(string directory)
+        {
+            string[] reports = Directory.GetFiles(directory, "*.bpreport", SearchOption.TopDirectoryOnly)
+                .Where(path => !path.EndsWith(".partial.bpreport", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            AssertEqual("single completed field report", 1, reports.Length);
+            return reports[0];
+        }
+
+        private static List<JsonElement> ReadFieldReportJson(string path)
+        {
+            var records = new List<JsonElement>();
+            foreach (string line in File.ReadLines(path))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                using JsonDocument document = JsonDocument.Parse(line);
+                records.Add(document.RootElement.Clone());
+            }
+
+            return records;
+        }
+
+        private static string ReadActiveFieldReport(string path)
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+
+        private static KeyValuePair<string, object?> FieldReportField(string name, object? value)
+        {
+            return new KeyValuePair<string, object?>(name, value);
         }
 
         private static void ValidatePhysicalVisualGeometry()

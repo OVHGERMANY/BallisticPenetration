@@ -6,13 +6,12 @@
 
 ## Runtime Branch / Commit
 - Branch: `development/physical-projectile-system`
-- Milestone base HEAD: `611e8a7`
-- Checkpoint: `Add bounded terminal lifecycle diagnostics`
+- Field-report milestone base HEAD: `d3eda0a`
+- Pending checkpoint: `Add automatic projectile field reports`
 
 ## Active Objective
-- Bounded physical lifecycle-terminal invariant diagnostics, including duplicate-terminal,
-  missing-terminal, and expected-shutdown cleanup records.
-- Gameplay physics must remain unchanged.
+- Automatic, self-contained, local `.bpreport` field bug reports with bounded asynchronous writing, manual issue markers, crash recovery, size limiting, retention, and privacy controls.
+- Gameplay physics remains unchanged.
 
 ## Fixed Constraints
 - No gameplay behavior changes in this milestone.
@@ -23,15 +22,30 @@
 - A projectile can cross multiple layers at the same recorded velocity while penetration and damage compound (diagnostics investigation target).
 
 ## Files Currently Involved
+- `src/BallisticPenetration/Core/Diagnostics/FieldReportRecord.cs`
+- `src/BallisticPenetration/Core/Diagnostics/FieldReportLifecycleEventSnapshot.cs`
+- `src/BallisticPenetration/Core/Diagnostics/FieldReportRecorder.cs`
+- `src/BallisticPenetration/Runtime/Diagnostics/FieldReportRuntime.cs`
 - `src/BallisticPenetration/Core/Diagnostics/PhysicalProjectileLifecycleTracker.cs`
 - `src/BallisticPenetration/Runtime/Diagnostics/PhysicalProjectileLifecycleDiagnostics.cs`
-- `src/BallisticPenetration/Runtime/State/PhysicalShotBinding.cs`
+- `src/BallisticPenetration/Runtime/PluginConfiguration.cs`
 - `src/BallisticPenetration/Runtime/Plugin.cs`
 - `tests/BallisticPenetration.Validation/Program.cs`
+- `docs/FIELD_REPORTS.md`
 - `docs/PROJECT_STATE.md`
-- `docs/exec-plans/active/lifecycle-diagnostics.md`
+- `docs/exec-plans/active/field-report-recorder.md`
 
 ## Latest Completed Work
+- Added automatic per-process `.bpreport` JSONL recording under the current BepInEx installation.
+- Added a fixed-capacity `4096`-record nonblocking producer queue with deterministic overflow accounting and a dedicated writer thread.
+- Added one-second default flushing, prompt critical-event flush requests, bounded report size, and deterministic oldest-first owned-file retention.
+- Added `F8` issue markers with debounce and recent projectile identities.
+- Added stale partial crash recovery without deleting or rewriting report contents.
+- Added session-start build/environment/configuration evidence and session-end lifecycle/queue/drop/truncation/error totals.
+- Added typed immutable lifecycle snapshots shared by the existing human-readable lifecycle logger and the field recorder.
+- Added safe shot/ammunition/weapon/target context when already available, with per-session shooter aliases and no raw profile names.
+- Added focused filesystem, concurrency, overflow, truncation, recovery, privacy, finalization, and JSONL validation.
+- Previous bounded lifecycle-diagnostics milestone is complete.
 - Baseline gameplay logic freeze established.
 - Diagnostics branch anchored at `2b216c1` with prior lifecycle work ready for follow-up.
 - Updated terminal telemetry schema on physical projectile lifecycle diagnostics:
@@ -56,15 +70,15 @@
   dedupe state, tombstones, and violation counters.
 - Replacement identities remain independent; a retired retained identity cannot be
   registered again as a fresh lifecycle.
-- Validation passpoint checkpoint:
+- Validation passpoint checkpoint for the previous lifecycle milestone:
   - `dotnet build ... -c Release -p:SptRoot="E:\\Games\\SPT" -p:TreatWarningsAsErrors=true` succeeded (0 warnings, 0 errors).
   - `dotnet run --project ...BallisticPenetration.Validation...` completed with `48 passed, 0 failed`.
 - Gameplay behavior unchanged; diagnostics-only modifications.
 
 ## Latest Build and Validation
 - BallisticPenetration build: succeeded with 0 warnings and 0 errors.
-- BallisticPenetration validation: `48 passed, 0 failed`.
-- No gameplay kinematic/impact branches changed in this step.
+- BallisticPenetration validation: `61 passed, 0 failed`.
+- No gameplay kinematic, collision, damage, penetration, fragmentation, armor, gore, or visual calculation/branch changed.
 
 ## Deployment Paths and Hashes
 - BallisticPenetration install path: `E:\Games\SPT\BepInEx\plugins\BallisticPenetration\BallisticPenetration.dll`
@@ -81,7 +95,7 @@
 - Install target: `E:\Games\SPT\BepInEx\plugins\HollywoodFX\HollywoodFX.dll`
 
 ## Exact Next Action
-- Combined in-game acceptance testing is the next action after this verified deployment.
+- Deploy and hash-verify the field-report build.
 
 ## Verified Lifecycle Diagnostics Deployment
 - Deployment date/time: 2026-08-19 09:07:26 CDT.

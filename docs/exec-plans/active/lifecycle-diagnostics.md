@@ -1,4 +1,6 @@
-# Lifecycle Diagnostics - Active Plan
+# Lifecycle Diagnostics - Completed Plan
+
+Status: completed before the automatic field-report-recorder milestone. The known multilayer velocity defect remains unresolved.
 
 ## Requirements
 - [x] Track and log `ballisticTerminal` and `lifecycleTerminal` states for each observed physical projectile event.

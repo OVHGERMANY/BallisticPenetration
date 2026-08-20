@@ -3,11 +3,13 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using System.Threading;
 using BallisticPenetration.Core.Diagnostics;
 using BallisticPenetration.Core.Physics;
 using BallisticPenetration.Runtime.State;
 using EFT.Ballistics;
+using EFT.InventoryLogic;
 using UnityEngine;
 
 namespace BallisticPenetration.Runtime.Diagnostics
@@ -188,6 +190,13 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     + ", duplicateTerminalViolations=" + duplicateTerminalViolations
                     + ", missingTerminalViolations=" + missingTerminalViolations
                     + ".");
+                FieldReportRuntime.RecordEvent(
+                    "shutdown-cleanup-summary",
+                    true,
+                    Field("activeEntriesClosed", closed.Count),
+                    Field("tombstonesBeforeFinalCleanup", tombstonesBeforeFinalCleanup),
+                    Field("duplicateTerminalViolations", duplicateTerminalViolations),
+                    Field("missingTerminalViolations", missingTerminalViolations));
             }
             catch (Exception exception)
             {
@@ -233,7 +242,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
 
             bool loggingEnabled = configuration != null
                 && configuration.LogPhysicalProjectileLifecycle.Value;
-            if (eventName == "created" && !loggingEnabled)
+            bool fieldRecordingEnabled = FieldReportRuntime.IsEnabled;
+            if (eventName == "created" && !loggingEnabled && !fieldRecordingEnabled)
             {
                 return;
             }
@@ -321,7 +331,7 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     ClearCollisionDedupeState(state.ProjectileId);
                 }
 
-                if (!loggingEnabled)
+                if (!loggingEnabled && !fieldRecordingEnabled)
                 {
                     return;
                 }
@@ -335,7 +345,8 @@ namespace BallisticPenetration.Runtime.Diagnostics
                     return;
                 }
 
-                if (!isCanonicalTerminal)
+                bool humanLoggingAllowed = loggingEnabled;
+                if (!isCanonicalTerminal && humanLoggingAllowed)
                 {
                     int recordNumber = Interlocked.Increment(ref _recordCount);
                     if (recordNumber > MaximumRecordsPerProcess)
@@ -346,8 +357,13 @@ namespace BallisticPenetration.Runtime.Diagnostics
                                 "Physical projectile lifecycle log reached its 8192-record process limit.");
                         }
 
-                        return;
+                        humanLoggingAllowed = false;
                     }
+                }
+
+                if (!humanLoggingAllowed && !fieldRecordingEnabled)
+                {
+                    return;
                 }
 
                 int resolvedSequence = recordSequence ?? state.CollisionHistory.Count;
@@ -377,55 +393,268 @@ namespace BallisticPenetration.Runtime.Diagnostics
                 PhysicalVector3 outgoingPhysical = resolvedCollision == null
                     ? PhysicalVector3.Zero
                     : resolvedCollision.OutgoingVelocityMetresPerSecond;
-                double incomingSpeed = incomingPhysical.Magnitude;
-                double outgoingSpeed = outgoingPhysical.Magnitude;
                 string outcome = resolvedCollision?.Outcome.ToString() ?? "pending";
                 string materialId = resolvedCollision?.MaterialId ?? "pending";
                 string materialClass = resolvedCollision == null
                     ? "pending"
                     : resolvedCollision.MaterialClass.ToString();
 
+                FieldReportLifecycleEventSnapshot reportSnapshot = CreateReportSnapshot(
+                    eventName,
+                    shot,
+                    binding,
+                    reason,
+                    collisionIdentity,
+                    resolvedSequence,
+                    collisionOrdinal,
+                    phase,
+                    isResolved,
+                    now,
+                    currentPosition,
+                    currentVelocity,
+                    incomingPhysical,
+                    outgoingPhysical,
+                    outcome,
+                    materialId,
+                    materialClass,
+                    isContinued,
+                    isReplaced,
+                    ballisticTerminal,
+                    lifecycleTerminal,
+                    lifecycleEndReason,
+                    targetWasAlreadyDead ?? false,
+                    targetSurfaceIdentity);
+
+                if (fieldRecordingEnabled)
+                {
+                    FieldReportRuntime.RecordLifecycle(reportSnapshot);
+                }
+
+                if (!humanLoggingAllowed)
+                {
+                    return;
+                }
+
                 Plugin.Log?.LogInfo(
-                    "Physical projectile lifecycle: event=" + eventName
-                    + ", projectile=" + state.ProjectileId
-                    + ", root=" + state.RootShotId
-                    + ", kind=" + state.Kind
-                    + ", fragmentIndex=" + state.FragmentIndex
-                    + ", fragmentGeneration=" + state.FragmentGeneration
-                    + ", recordSequence=" + resolvedSequence
-                    + ", collisionOrdinal=" + collisionOrdinal
-                    + ", phase=" + (string.IsNullOrWhiteSpace(phase) ? "none" : phase)
-                    + ", resolutionKnown=" + isResolved.ToString().ToLowerInvariant()
+                    "Physical projectile lifecycle: event=" + reportSnapshot.EventName
+                    + ", projectile=" + reportSnapshot.ProjectileIdentity
+                    + ", root=" + reportSnapshot.RootIdentity
+                    + ", kind=" + reportSnapshot.ProjectileKind
+                    + ", fragmentIndex=" + reportSnapshot.FragmentIndex
+                    + ", fragmentGeneration=" + reportSnapshot.FragmentGeneration
+                    + ", recordSequence=" + reportSnapshot.RecordSequence
+                    + ", collisionOrdinal=" + reportSnapshot.CollisionOrdinal
+                    + ", phase=" + (string.IsNullOrWhiteSpace(reportSnapshot.Phase) ? "none" : reportSnapshot.Phase)
+                    + ", resolutionKnown=" + reportSnapshot.ResolutionKnown.ToString().ToLowerInvariant()
                     + ", createdAt=" + Format(binding.CreationTimeSeconds)
                     + ", age=" + Format(Math.Max(0d, now - binding.CreationTimeSeconds))
-                    + ", creationPosition=" + Format(binding.CreationPosition)
-                    + ", creationVelocity=" + Format(binding.CreationVelocity)
-                    + ", currentPosition=" + Format(currentPosition)
-                    + ", lastVelocity=" + Format(currentVelocity)
-                    + ", lastSpeed=" + Format(currentVelocity.magnitude)
-                    + ", collisionOutcome=" + outcome
-                    + ", materialId=" + materialId
-                    + ", materialClass=" + materialClass
-                    + ", incoming=" + Format(incomingPhysical)
-                    + ", incomingSpeed=" + Format(incomingSpeed)
-                    + ", outgoing=" + Format(outgoingPhysical)
-                    + ", outgoingSpeed=" + Format(outgoingSpeed)
-                    + ", continued=" + isContinued.ToString().ToLowerInvariant()
-                    + ", replaced=" + isReplaced.ToString().ToLowerInvariant()
-                    + ", ballisticTerminal=" + ballisticTerminal.ToString().ToLowerInvariant()
-                    + ", lifecycleTerminal=" + lifecycleTerminal.ToString().ToLowerInvariant()
-                    + ", lifecycleEndReason=" + lifecycleEndReason
-                    + ", targetSurface=" + (string.IsNullOrWhiteSpace(targetSurfaceIdentity)
+                    + ", creationPosition=" + Format(reportSnapshot.CreationPosition)
+                    + ", creationVelocity=" + Format(reportSnapshot.CreationVelocity)
+                    + ", currentPosition=" + Format(reportSnapshot.CurrentPosition)
+                    + ", lastVelocity=" + Format(reportSnapshot.LastVelocity)
+                    + ", lastSpeed=" + Format(reportSnapshot.LastSpeed)
+                    + ", collisionOutcome=" + reportSnapshot.CollisionOutcome
+                    + ", materialId=" + reportSnapshot.MaterialId
+                    + ", materialClass=" + reportSnapshot.MaterialClass
+                    + ", incoming=" + Format(reportSnapshot.IncomingVelocity)
+                    + ", incomingSpeed=" + Format(reportSnapshot.IncomingSpeed)
+                    + ", outgoing=" + Format(reportSnapshot.OutgoingVelocity)
+                    + ", outgoingSpeed=" + Format(reportSnapshot.OutgoingSpeed)
+                    + ", continued=" + reportSnapshot.Continued.ToString().ToLowerInvariant()
+                    + ", replaced=" + reportSnapshot.Replaced.ToString().ToLowerInvariant()
+                    + ", ballisticTerminal=" + reportSnapshot.BallisticTerminal.ToString().ToLowerInvariant()
+                    + ", lifecycleTerminal=" + reportSnapshot.LifecycleTerminal.ToString().ToLowerInvariant()
+                    + ", lifecycleEndReason=" + reportSnapshot.LifecycleEndReason
+                    + ", targetSurface=" + (string.IsNullOrWhiteSpace(reportSnapshot.TargetSurface)
                         ? "none"
-                        : targetSurfaceIdentity)
-                    + ", targetAlreadyDead=" + (targetWasAlreadyDead ?? false).ToString().ToLowerInvariant()
-                    + ", terminalState=" + state.TerminalState
-                    + ", shotState=" + (shot?.BulletState.ToString() ?? "released")
-                    + ", reason=" + reason + ".");
+                        : reportSnapshot.TargetSurface)
+                    + ", targetAlreadyDead=" + reportSnapshot.TargetWasAlreadyDead.ToString().ToLowerInvariant()
+                    + ", terminalState=" + reportSnapshot.TerminalState
+                    + ", shotState=" + reportSnapshot.ShotState
+                    + ", reason=" + reportSnapshot.Reason + ".");
             }
             catch (Exception exception)
             {
                 Plugin.LogHookFailure("Physical projectile lifecycle diagnostics", exception);
+            }
+        }
+
+        private static FieldReportLifecycleEventSnapshot CreateReportSnapshot(
+            string eventName,
+            Shot? shot,
+            PhysicalShotBinding binding,
+            string reason,
+            string? collisionIdentity,
+            int recordSequence,
+            int collisionOrdinal,
+            string? phase,
+            bool resolutionKnown,
+            double now,
+            Vector3 currentPosition,
+            Vector3 currentVelocity,
+            PhysicalVector3 incomingVelocity,
+            PhysicalVector3 outgoingVelocity,
+            string collisionOutcome,
+            string materialId,
+            string materialClass,
+            bool continued,
+            bool replaced,
+            bool ballisticTerminal,
+            bool lifecycleTerminal,
+            string lifecycleEndReason,
+            bool targetWasAlreadyDead,
+            string? targetSurface)
+        {
+            PhysicalProjectileState state = binding.State;
+            AmmoTemplate? ammunition = shot?.Ammo?.Template as AmmoTemplate;
+            object? weapon = shot?.Weapon;
+            object? weaponTemplate = ReadProperty(weapon, "Template");
+            string ammunitionTemplateId = ammunition?.StringId ?? string.Empty;
+            string ammunitionName = ammunition?.Name ?? string.Empty;
+            string caliber = ReadStringProperty(ammunition, "Caliber");
+            string weaponTemplateId = ReadStringProperty(weapon, "TemplateId");
+            if (string.IsNullOrWhiteSpace(weaponTemplateId))
+            {
+                weaponTemplateId = ReadStringProperty(weaponTemplate, "StringId");
+            }
+
+            string weaponDisplayName = ReadStringProperty(weaponTemplate, "Name");
+            bool? localPlayerShooter = ReadNullableBoolProperty(shot?.Player, "IsYourPlayer");
+            string shooterAlias = FieldReportRuntime.CreateProfileAlias(shot?.PlayerProfileID);
+            PhysicalVector3? shooterPosition = shot == null
+                ? null
+                : ToPhysical(shot.StartPosition);
+            Vector3 approximateOrigin = shot?.StartPosition ?? binding.CreationPosition;
+            PhysicalVector3 displacement = new PhysicalVector3(
+                currentPosition.x - approximateOrigin.x,
+                currentPosition.y - approximateOrigin.y,
+                currentPosition.z - approximateOrigin.z);
+            double approximateDistance = displacement.Magnitude;
+            double? distanceTravelled = ReadNullableNonNegativeDoubleProperty(shot, "Distance");
+            string targetCategory = shot?.HittedBallisticCollider?.GetType().Name ?? string.Empty;
+            string targetBodyPart = shot?.HittedBallisticCollider is BodyPartCollider bodyPartCollider
+                ? bodyPartCollider.BodyPartColliderType.ToString()
+                : string.Empty;
+            string armorContext = ResolveArmorContext(shot);
+            string colliderDescriptor = shot?.HitCollider?.GetType().Name ?? string.Empty;
+            string replacementRelationship = string.IsNullOrWhiteSpace(state.SourceCollisionId)
+                ? string.Empty
+                : "source-collision:" + state.SourceCollisionId;
+
+            return new FieldReportLifecycleEventSnapshot(
+                eventName,
+                DateTimeOffset.Now,
+                state.ProjectileId,
+                state.RootShotId,
+                state.Kind.ToString(),
+                state.FragmentIndex,
+                state.FragmentGeneration,
+                recordSequence,
+                collisionOrdinal,
+                phase ?? string.Empty,
+                resolutionKnown,
+                binding.CreationTimeSeconds,
+                lifecycleTerminal ? now : 0d,
+                ToPhysical(binding.CreationPosition),
+                ToPhysical(binding.CreationVelocity),
+                ToPhysical(currentPosition),
+                ToPhysical(currentVelocity),
+                collisionIdentity ?? string.Empty,
+                materialId,
+                materialClass,
+                incomingVelocity,
+                outgoingVelocity,
+                collisionOutcome,
+                continued,
+                replaced,
+                ballisticTerminal,
+                lifecycleTerminal,
+                lifecycleEndReason,
+                targetWasAlreadyDead,
+                targetSurface ?? string.Empty,
+                state.TerminalState.ToString(),
+                shot?.BulletState.ToString() ?? "released",
+                reason,
+                localPlayerShooter,
+                shooterAlias,
+                weaponTemplateId,
+                weaponDisplayName,
+                ammunitionTemplateId,
+                ammunitionName,
+                caliber,
+                ammunition == null ? null : ammunition.InitialSpeed,
+                shooterPosition,
+                targetCategory,
+                targetBodyPart,
+                armorContext,
+                colliderDescriptor,
+                distanceTravelled,
+                approximateDistance,
+                replacementRelationship);
+        }
+
+        private static string ResolveArmorContext(Shot? shot)
+        {
+            string material = shot?.HittedBallisticCollider?.TypeOfMaterial.ToString() ?? string.Empty;
+            if (material == "BodyArmor")
+            {
+                return "body-armor";
+            }
+
+            if (material == "Helmet" || material == "HelmetRicochet")
+            {
+                return "helmet";
+            }
+
+            return string.Empty;
+        }
+
+        private static object? ReadProperty(object? instance, string propertyName)
+        {
+            try
+            {
+                return instance?.GetType().GetProperty(
+                    propertyName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.GetValue(instance, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string ReadStringProperty(object? instance, string propertyName)
+        {
+            return ReadProperty(instance, propertyName)?.ToString() ?? string.Empty;
+        }
+
+        private static bool? ReadNullableBoolProperty(object? instance, string propertyName)
+        {
+            object? value = ReadProperty(instance, propertyName);
+            return value is bool boolean ? boolean : (bool?)null;
+        }
+
+        private static double? ReadNullableNonNegativeDoubleProperty(
+            object? instance,
+            string propertyName)
+        {
+            object? value = ReadProperty(instance, propertyName);
+            if (value == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                return double.IsNaN(number) || double.IsInfinity(number) || number < 0d
+                    ? null
+                    : number;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -620,6 +849,18 @@ namespace BallisticPenetration.Runtime.Diagnostics
             }
 
             PhysicalLifecycleSnapshot snapshot = firstTerminal.Snapshot;
+            FieldReportRuntime.RecordEvent(
+                "terminal-duplicate",
+                true,
+                Field("projectileIdentity", snapshot.ProjectileIdentity),
+                Field("rootIdentity", snapshot.RootIdentity),
+                Field("projectileKind", snapshot.ProjectileKind),
+                Field("fragmentIndex", snapshot.FragmentIndex),
+                Field("fragmentGeneration", snapshot.FragmentGeneration),
+                Field("firstTerminalReason", FormatTerminalReason(firstTerminal)),
+                Field("attemptedTerminalReason", FormatTerminalReason(attemptedReason)),
+                Field("firstTerminalTimestamp", firstTerminal.TerminalTimestamp),
+                Field("duplicateTimestamp", duplicateTimestamp));
             Plugin.Log?.LogWarning(
                 "Physical projectile lifecycle invariant: event=terminal-duplicate"
                 + ", projectile=" + snapshot.ProjectileIdentity
@@ -639,6 +880,24 @@ namespace BallisticPenetration.Runtime.Diagnostics
             double removalTimestamp)
         {
             PhysicalLifecycleSnapshot snapshot = missing.Snapshot;
+            FieldReportRuntime.RecordEvent(
+                "terminal-missing",
+                true,
+                Field("projectileIdentity", snapshot.ProjectileIdentity),
+                Field("rootIdentity", snapshot.RootIdentity),
+                Field("projectileKind", snapshot.ProjectileKind),
+                Field("fragmentIndex", snapshot.FragmentIndex),
+                Field("fragmentGeneration", snapshot.FragmentGeneration),
+                Field("removalPath", missing.RemovalReason),
+                Field("creationTimestamp", snapshot.CreationTimestamp),
+                Field("lastPosition", snapshot.LastKnownPosition),
+                Field("lastVelocity", snapshot.LastKnownVelocity),
+                Field("lastSpeed", snapshot.LastKnownSpeed),
+                Field("lastCollisionIdentity", string.IsNullOrWhiteSpace(snapshot.LastCollisionIdentity)
+                    ? null
+                    : snapshot.LastCollisionIdentity),
+                Field("lastCollisionOrdinal", snapshot.LastCollisionOrdinal),
+                Field("removalTimestamp", removalTimestamp));
             Plugin.Log?.LogWarning(
                 "Physical projectile lifecycle invariant: event=terminal-missing"
                 + ", projectile=" + snapshot.ProjectileIdentity
@@ -661,6 +920,27 @@ namespace BallisticPenetration.Runtime.Diagnostics
             PhysicalLifecycleSnapshot snapshot,
             double shutdownTimestamp)
         {
+            FieldReportRuntime.RecordEvent(
+                "shutdown-cleanup",
+                true,
+                Field("projectileIdentity", snapshot.ProjectileIdentity),
+                Field("rootIdentity", snapshot.RootIdentity),
+                Field("projectileKind", snapshot.ProjectileKind),
+                Field("fragmentIndex", snapshot.FragmentIndex),
+                Field("fragmentGeneration", snapshot.FragmentGeneration),
+                Field("creationTimestamp", snapshot.CreationTimestamp),
+                Field("terminalTimestamp", shutdownTimestamp),
+                Field("position", snapshot.LastKnownPosition),
+                Field("lastVelocity", snapshot.LastKnownVelocity),
+                Field("lastSpeed", snapshot.LastKnownSpeed),
+                Field("lastCollisionIdentity", string.IsNullOrWhiteSpace(snapshot.LastCollisionIdentity)
+                    ? null
+                    : snapshot.LastCollisionIdentity),
+                Field("lastCollisionOrdinal", snapshot.LastCollisionOrdinal),
+                Field("ballisticTerminal", false),
+                Field("lifecycleTerminal", true),
+                Field("lifecycleEndReason", "shutdown"),
+                Field("reason", "shutdown-cleanup"));
             Plugin.Log?.LogInfo(
                 "Physical projectile lifecycle: event=retired"
                 + ", projectile=" + snapshot.ProjectileIdentity
@@ -721,6 +1001,11 @@ namespace BallisticPenetration.Runtime.Diagnostics
         private static string Format(double value)
         {
             return value.ToString("0.######", CultureInfo.InvariantCulture);
+        }
+
+        private static KeyValuePair<string, object?> Field(string name, object? value)
+        {
+            return new KeyValuePair<string, object?>(name, value);
         }
 
         private sealed class CollisionRecordTupleComparer : IEqualityComparer<(string CollisionIdentity, string Phase)>

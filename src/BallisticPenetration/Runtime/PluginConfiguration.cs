@@ -1,5 +1,6 @@
 using BepInEx.Configuration;
 using BallisticPenetration.Core.Physics;
+using UnityEngine;
 
 namespace BallisticPenetration.Runtime
 {
@@ -186,6 +187,50 @@ namespace BallisticPenetration.Runtime
                 new ConfigDescription(
                     "World-space size of the cross marker drawn at a captured impact point.",
                     new AcceptableValueRange<float>(0.02f, 2f)));
+
+            EnableFieldBugReports = config.Bind(
+                "Field Reports",
+                "Enable Field Bug Reports",
+                true,
+                "Write one local, append-only BallisticPenetration field report per game session.");
+
+            FieldReportIssueMarkerKey = config.Bind(
+                "Field Reports",
+                "Field Report Issue Marker Key",
+                new KeyboardShortcut(KeyCode.F8),
+                "Mark the current moment in the active field report without pausing gameplay.");
+
+            FieldReportFlushIntervalSeconds = config.Bind(
+                "Field Reports",
+                "Field Report Flush Interval Seconds",
+                1f,
+                new ConfigDescription(
+                    "Maximum normal delay between field-report flushes.",
+                    new AcceptableValueRange<float>(0.25f, 30f)));
+
+            FieldReportMaximumCompletedFiles = config.Bind(
+                "Field Reports",
+                "Field Report Maximum Completed Files",
+                20,
+                new ConfigDescription(
+                    "Maximum number of completed BallisticPenetration field reports retained.",
+                    new AcceptableValueRange<int>(1, 200)));
+
+            FieldReportMaximumFolderMiB = config.Bind(
+                "Field Reports",
+                "Field Report Maximum Folder MiB",
+                512,
+                new ConfigDescription(
+                    "Maximum combined size of owned completed field reports.",
+                    new AcceptableValueRange<int>(16, 8192)));
+
+            FieldReportMaximumFileMiB = config.Bind(
+                "Field Reports",
+                "Field Report Maximum File MiB",
+                256,
+                new ConfigDescription(
+                    "Maximum size of one field report, including its critical-event reserve.",
+                    new AcceptableValueRange<int>(8, 2048)));
         }
 
         internal ConfigEntry<bool> Enabled { get; private set; }
@@ -231,6 +276,18 @@ namespace BallisticPenetration.Runtime
         internal ConfigEntry<float> MaximumTraceSegmentMeters { get; private set; }
 
         internal ConfigEntry<float> ImpactMarkerSizeMeters { get; private set; }
+
+        internal ConfigEntry<bool> EnableFieldBugReports { get; private set; }
+
+        internal ConfigEntry<KeyboardShortcut> FieldReportIssueMarkerKey { get; private set; }
+
+        internal ConfigEntry<float> FieldReportFlushIntervalSeconds { get; private set; }
+
+        internal ConfigEntry<int> FieldReportMaximumCompletedFiles { get; private set; }
+
+        internal ConfigEntry<int> FieldReportMaximumFolderMiB { get; private set; }
+
+        internal ConfigEntry<int> FieldReportMaximumFileMiB { get; private set; }
 
         internal bool TryGetExponentValues(out double penetrationExponent, out double damageExponent)
         {
