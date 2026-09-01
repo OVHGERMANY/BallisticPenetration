@@ -5,7 +5,8 @@ param(
 
     [string] $ExpectedSptVersion = '4.1.3',
 
-    [string] $ExpectedDllSha256 = 'EBFA1B58A8770D973C43D957C7D9FEC3BFF4C05505653106D7B3814EA41CBDF3',
+    [Parameter(Mandatory)]
+    [string] $ExpectedDllSha256,
 
     [switch] $ActorVisualConfirmed,
 
@@ -242,4 +243,3 @@ $result | ConvertTo-Json -Depth 6
 if ($failures.Count -gt 0) {
     exit 1
 }
-
