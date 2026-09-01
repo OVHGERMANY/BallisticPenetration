@@ -6,7 +6,7 @@ using System.Collections.Generic;
 namespace BallisticPenetration.Core.Physics
 {
     /// <summary>
-    /// Exact SPT 4.1.2 ammunition identity mapped to physical construction and terminal design.
+    /// Exact SPT 4.1.3 ammunition identity mapped to physical construction and terminal design.
     /// The catalog stores no localized game text. Entries whose source data omits metallurgy use a
     /// conservative conventional-projectile profile; payload entries are cataloged but are not
     /// admitted to the kinetic projectile replacement.

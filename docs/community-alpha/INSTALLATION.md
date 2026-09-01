@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- SPT 4.1.2 exactly.
+- SPT 4.1.3 exactly.
 - EFT 0.16.9.40743.
 - Windows client process `EscapeFromTarkov.exe`.
 

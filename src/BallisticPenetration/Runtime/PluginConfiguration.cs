@@ -38,7 +38,7 @@ namespace BallisticPenetration.Runtime
                 "Physical Rendering",
                 "Render Physical Components",
                 true,
-                "Draw dedicated geometry for physically modeled bullets, fragments, embedded components, and target spall. This is active only when experimental physical projectiles are enabled.");
+                "Draw dedicated geometry for physically modeled bullets and projectile fragments. Target spall and components embedded in characters or their equipment remain simulation-only. This is active only when experimental physical projectiles are enabled.");
 
             MaximumVisiblePhysicalComponents = config.Bind(
                 "Physical Rendering",

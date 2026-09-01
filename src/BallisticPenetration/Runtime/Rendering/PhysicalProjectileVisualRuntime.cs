@@ -18,8 +18,9 @@ namespace BallisticPenetration.Runtime.Rendering
 {
     /// <summary>
     /// Main-thread visual pool for physical components. Collision hooks enqueue immutable ownership
-    /// commands only; all Unity object creation, mutation, culling, and destruction happens from
-    /// Plugin.Update. Live entries retain the exact pool-safe Shot binding that created them.
+    /// commands and snapshot embedded surface-local poses before enqueue; all Unity object creation,
+    /// mutation, culling, and destruction happens from Plugin.Update. Live entries retain the exact
+    /// pool-safe Shot binding that created them.
     /// </summary>
     internal static class PhysicalProjectileVisualRuntime
     {
@@ -60,6 +61,13 @@ namespace BallisticPenetration.Runtime.Rendering
                 return;
             }
 
+            if (!PhysicalComponentVisualEligibility.ShouldRender(
+                    binding.State,
+                    PhysicalComponentVisualContext.InFlight))
+            {
+                return;
+            }
+
             long token = NextOwnerToken();
             if (token <= 0)
             {
@@ -71,12 +79,19 @@ namespace BallisticPenetration.Runtime.Rendering
                 token,
                 shot,
                 binding,
-                binding.State));
+                binding.State,
+                null));
         }
 
-        internal static void RegisterEmbedded(PhysicalProjectileState state)
+        internal static void RegisterEmbedded(
+            PhysicalProjectileState state,
+            Collider? hitCollider,
+            bool characterOwnedSurface)
         {
-            if (state == null)
+            PhysicalComponentVisualContext context = characterOwnedSurface
+                ? PhysicalComponentVisualContext.EmbeddedCharacterSurface
+                : PhysicalComponentVisualContext.EmbeddedWorldSurface;
+            if (!PhysicalComponentVisualEligibility.ShouldRender(state, context))
             {
                 return;
             }
@@ -87,12 +102,17 @@ namespace BallisticPenetration.Runtime.Rendering
                 return;
             }
 
+            EmbeddedVisualAnchor? embeddedAnchor = TryCaptureEmbeddedAnchor(
+                hitCollider,
+                state.PositionMetres,
+                state.Orientation);
             Enqueue(new VisualCommand(
                 VisualCommandKind.RegisterEmbedded,
                 token,
                 null,
                 null,
-                state));
+                state,
+                embeddedAnchor));
         }
 
         internal static void Retire(PhysicalShotBinding binding)
@@ -104,6 +124,7 @@ namespace BallisticPenetration.Runtime.Rendering
                     0L,
                     null,
                     binding,
+                    null,
                     null));
             }
         }
@@ -311,7 +332,8 @@ namespace BallisticPenetration.Runtime.Rendering
                 command.State,
                 pose,
                 false,
-                double.PositiveInfinity);
+                double.PositiveInfinity,
+                null);
             AddActive(visual);
         }
 
@@ -334,7 +356,8 @@ namespace BallisticPenetration.Runtime.Rendering
                 command.State,
                 pose,
                 true,
-                expiresAt);
+                expiresAt,
+                command.EmbeddedAnchor);
             AddActive(visual);
         }
 
@@ -807,6 +830,52 @@ namespace BallisticPenetration.Runtime.Rendering
             _ = PendingCommands.Enqueue(command);
         }
 
+        private static EmbeddedVisualAnchor? TryCaptureEmbeddedAnchor(
+            Collider? collider,
+            PhysicalVector3 worldPositionMetres,
+            PhysicalOrientation worldOrientation)
+        {
+            if (collider == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return EmbeddedVisualAnchor.TryCreate(
+                    collider,
+                    worldPositionMetres,
+                    worldOrientation,
+                    out EmbeddedVisualAnchor? anchor)
+                    ? anchor
+                    : null;
+            }
+            catch (UnityException)
+            {
+                return null;
+            }
+            catch (MissingReferenceException)
+            {
+                return null;
+            }
+            catch (MissingComponentException)
+            {
+                return null;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+            catch (NullReferenceException)
+            {
+                return null;
+            }
+        }
+
         private static long NextOwnerToken()
         {
             long token = Interlocked.Increment(ref _nextOwnerToken);
@@ -859,13 +928,15 @@ namespace BallisticPenetration.Runtime.Rendering
                 long ownerToken,
                 Shot? shot,
                 PhysicalShotBinding? binding,
-                PhysicalProjectileState? state)
+                PhysicalProjectileState? state,
+                EmbeddedVisualAnchor? embeddedAnchor)
             {
                 Kind = kind;
                 OwnerToken = ownerToken;
                 Shot = shot;
                 Binding = binding;
                 State = state;
+                EmbeddedAnchor = embeddedAnchor;
             }
 
             internal VisualCommandKind Kind { get; }
@@ -877,6 +948,8 @@ namespace BallisticPenetration.Runtime.Rendering
             internal PhysicalShotBinding? Binding { get; }
 
             internal PhysicalProjectileState? State { get; }
+
+            internal EmbeddedVisualAnchor? EmbeddedAnchor { get; }
         }
 
         private sealed class PhysicalShotBindingReferenceComparer :
@@ -911,7 +984,8 @@ namespace BallisticPenetration.Runtime.Rendering
                 PhysicalProjectileState state,
                 PhysicalVisualPose pose,
                 bool embedded,
-                double expiresAt)
+                double expiresAt,
+                EmbeddedVisualAnchor? embeddedAnchor)
             {
                 OwnerToken = ownerToken;
                 Shot = shot;
@@ -920,6 +994,7 @@ namespace BallisticPenetration.Runtime.Rendering
                 Pose = pose;
                 Embedded = embedded;
                 ExpiresAt = expiresAt;
+                EmbeddedAnchor = embeddedAnchor;
                 CurrentPosition = PhysicalImpactGeometryResolver.ToUnity(
                     pose.PositionMetres);
                 CurrentOrientation = pose.Orientation;
@@ -939,6 +1014,8 @@ namespace BallisticPenetration.Runtime.Rendering
             internal bool Embedded { get; }
 
             internal double ExpiresAt { get; }
+
+            internal EmbeddedVisualAnchor? EmbeddedAnchor { get; }
 
             internal Vector3 CurrentPosition { get; private set; }
 
@@ -974,13 +1051,35 @@ namespace BallisticPenetration.Runtime.Rendering
                 position = CurrentPosition;
                 if (Embedded)
                 {
-                    bool remainsActive = now <= ExpiresAt && IsFiniteVector(position);
-                    RetirementReason = remainsActive
-                        ? "none"
-                        : now > ExpiresAt
-                            ? "embedded-expired"
+                    if (now > ExpiresAt)
+                    {
+                        RetirementReason = "embedded-expired";
+                        return false;
+                    }
+
+                    if (EmbeddedAnchor == null)
+                    {
+                        bool worldPoseValid = IsFiniteVector(position)
+                            && CurrentOrientation.IsUnit;
+                        RetirementReason = worldPoseValid
+                            ? "none"
                             : "embedded-position-invalid";
-                    return remainsActive;
+                        return worldPoseValid;
+                    }
+
+                    if (!EmbeddedAnchor.TryResolve(
+                            out Vector3 anchoredPosition,
+                            out PhysicalOrientation anchoredOrientation))
+                    {
+                        RetirementReason = "embedded-anchor-invalid";
+                        return false;
+                    }
+
+                    CurrentPosition = anchoredPosition;
+                    CurrentOrientation = anchoredOrientation;
+                    position = anchoredPosition;
+                    RetirementReason = "none";
+                    return true;
                 }
 
                 if (Shot == null
@@ -1014,6 +1113,199 @@ namespace BallisticPenetration.Runtime.Rendering
                 CurrentOrientation = visualOrientation;
                 position = current;
                 RetirementReason = "none";
+                return true;
+            }
+
+            private static bool IsFiniteVector(Vector3 value)
+            {
+                return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+            }
+
+            private static bool IsFinite(float value)
+            {
+                return !float.IsNaN(value) && !float.IsInfinity(value);
+            }
+        }
+
+        private sealed class EmbeddedVisualAnchor
+        {
+            private readonly Collider _collider;
+            private readonly Transform _transform;
+            private readonly int _colliderInstanceId;
+            private readonly int _transformInstanceId;
+            private readonly int _gameObjectInstanceId;
+            private readonly int _sceneHandle;
+            private readonly int _parentInstanceId;
+            private readonly int _rootInstanceId;
+            private readonly Vector3 _localPosition;
+            private readonly PhysicalOrientation _localOrientation;
+
+            private EmbeddedVisualAnchor(
+                Collider collider,
+                Transform transform,
+                int colliderInstanceId,
+                int transformInstanceId,
+                int gameObjectInstanceId,
+                int sceneHandle,
+                int parentInstanceId,
+                int rootInstanceId,
+                Vector3 localPosition,
+                PhysicalOrientation localOrientation)
+            {
+                _collider = collider;
+                _transform = transform;
+                _colliderInstanceId = colliderInstanceId;
+                _transformInstanceId = transformInstanceId;
+                _gameObjectInstanceId = gameObjectInstanceId;
+                _sceneHandle = sceneHandle;
+                _parentInstanceId = parentInstanceId;
+                _rootInstanceId = rootInstanceId;
+                _localPosition = localPosition;
+                _localOrientation = localOrientation;
+            }
+
+            internal static bool TryCreate(
+                Collider collider,
+                PhysicalVector3 worldPositionMetres,
+                PhysicalOrientation worldOrientation,
+                out EmbeddedVisualAnchor? anchor)
+            {
+                anchor = null;
+                if (collider == null)
+                {
+                    return false;
+                }
+
+                Transform transform = collider.transform;
+                if (transform == null)
+                {
+                    return false;
+                }
+
+                GameObject gameObject = transform.gameObject;
+                Transform root = transform.root;
+                if (gameObject == null
+                    || root == null
+                    || gameObject.isStatic
+                    || !gameObject.activeInHierarchy
+                    || !gameObject.scene.isLoaded)
+                {
+                    return false;
+                }
+
+                Vector3 worldPosition = PhysicalImpactGeometryResolver.ToUnity(
+                    worldPositionMetres);
+                Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
+                if (!IsFiniteVector(localPosition)
+                    || !TryGetPhysicalOrientation(
+                        transform.rotation,
+                        out PhysicalOrientation anchorWorldOrientation)
+                    || !PhysicalVisualAnchorGeometry.TryCreateLocalOrientation(
+                        anchorWorldOrientation,
+                        worldOrientation,
+                        out PhysicalOrientation localOrientation))
+                {
+                    return false;
+                }
+
+                Transform? parent = transform.parent;
+                anchor = new EmbeddedVisualAnchor(
+                    collider,
+                    transform,
+                    collider.GetInstanceID(),
+                    transform.GetInstanceID(),
+                    gameObject.GetInstanceID(),
+                    gameObject.scene.handle,
+                    parent == null ? 0 : parent.GetInstanceID(),
+                    root.GetInstanceID(),
+                    localPosition,
+                    localOrientation);
+                return true;
+            }
+
+            internal bool TryResolve(
+                out Vector3 worldPosition,
+                out PhysicalOrientation worldOrientation)
+            {
+                worldPosition = default;
+                worldOrientation = PhysicalOrientation.Identity;
+                if (_collider == null || _transform == null)
+                {
+                    return false;
+                }
+
+                Transform currentColliderTransform = _collider.transform;
+                if (currentColliderTransform == null)
+                {
+                    return false;
+                }
+
+                GameObject gameObject = _transform.gameObject;
+                Transform root = _transform.root;
+                Transform? parent = _transform.parent;
+                if (gameObject == null
+                    || root == null
+                    || _collider.GetInstanceID() != _colliderInstanceId
+                    || currentColliderTransform.GetInstanceID() != _transformInstanceId
+                    || _transform.GetInstanceID() != _transformInstanceId
+                    || gameObject.GetInstanceID() != _gameObjectInstanceId
+                    || gameObject.scene.handle != _sceneHandle
+                    || !gameObject.scene.isLoaded
+                    || !gameObject.activeInHierarchy
+                    || (parent == null ? 0 : parent.GetInstanceID()) != _parentInstanceId
+                    || root.GetInstanceID() != _rootInstanceId
+                    || !TryGetPhysicalOrientation(
+                        _transform.rotation,
+                        out PhysicalOrientation anchorWorldOrientation)
+                    || !PhysicalVisualAnchorGeometry.TryResolveWorldOrientation(
+                        anchorWorldOrientation,
+                        _localOrientation,
+                        out worldOrientation))
+                {
+                    return false;
+                }
+
+                worldPosition = _transform.TransformPoint(_localPosition);
+                return IsFiniteVector(worldPosition);
+            }
+
+            private static bool TryGetPhysicalOrientation(
+                Quaternion value,
+                out PhysicalOrientation orientation)
+            {
+                orientation = PhysicalOrientation.Identity;
+                if (!IsFinite(value.x)
+                    || !IsFinite(value.y)
+                    || !IsFinite(value.z)
+                    || !IsFinite(value.w))
+                {
+                    return false;
+                }
+
+                double x = value.x;
+                double y = value.y;
+                double z = value.z;
+                double w = value.w;
+                double magnitudeSquared = (x * x) + (y * y) + (z * z) + (w * w);
+                if (double.IsNaN(magnitudeSquared)
+                    || double.IsInfinity(magnitudeSquared)
+                    || magnitudeSquared <= 0d)
+                {
+                    return false;
+                }
+
+                double inverseMagnitude = 1d / Math.Sqrt(magnitudeSquared);
+                var normalized = new PhysicalOrientation(
+                    x * inverseMagnitude,
+                    y * inverseMagnitude,
+                    z * inverseMagnitude,
+                    w * inverseMagnitude);
+                if (!normalized.IsUnit)
+                {
+                    return false;
+                }
+
+                orientation = normalized;
                 return true;
             }
 

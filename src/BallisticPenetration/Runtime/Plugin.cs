@@ -92,7 +92,7 @@ namespace BallisticPenetration
                     armorPlateColliderPostmortemArmorPatch.HarmonyId);
 
                 EnablePatchesTransactionally();
-                Logger.LogInfo(PluginName + " loaded for SPT 4.1.2.");
+                Logger.LogInfo(PluginName + " loaded for SPT 4.1.3.");
             }
             catch (Exception exception)
             {

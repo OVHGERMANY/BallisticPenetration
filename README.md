@@ -1,13 +1,13 @@
 # Janky-BallisticPenetration
 
-Standalone SPT 4.1.2 client plugin for uncapped, impact-speed-based terminal ballistics.
+Standalone SPT 4.1.3 client plugin for uncapped, impact-speed-based terminal ballistics.
 
 The current development build is a public experimental alpha. Installation, testing,
 privacy, rollback, compatibility, and confirmed-issue guidance is under
 [`docs/community-alpha`](docs/community-alpha/TESTING_GUIDE.md).
 
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
-and requires its version to equal `4.1.2` exactly before resolving targets or enabling
+and requires its version to equal `4.1.3` exactly before resolving targets or enabling
 any of its four Harmony patches. The hard `BepInDependency` remains for load ordering
 and minimum dependency handling, but it does not replace the equality check. A missing
 version or any other version is logged and initialization fails closed.
@@ -133,7 +133,7 @@ same pooled `Shot` object for another projectile.
 The runtime has conservative development profiles for projectile construction and EFT world,
 body, and armor material classes. These are deterministic engineering estimates derived from
 the limited fields exposed by EFT; they are not manufacturer metallurgy or certification data.
-An exact SPT 4.1.2 catalog classifies all 208 positive-speed ammunition templates by construction,
+An exact SPT 4.1.3 catalog classifies all 208 positive-speed ammunition templates by construction,
 terminal design, and initial shape. It admits 185 kinetic templates and explicitly rejects 23
 payload templates from physical-projectile replacement. Shot and flechette loads are modeled per
 EFT projectile, including their distinct spherical or dart geometry. Large-caliber kinetic rounds
@@ -157,11 +157,13 @@ mass, shape, cross-section, drag, velocity, energy, damage, penetration, lineage
 collision state. Target spall can itself deform and fragment at a later target without being
 reclassified as bullet mass.
 
-The physical path now includes dedicated post-impact geometry for intact and deformed projectiles,
-projectile fragments, and target-generated spall. Ten deterministic low-poly shape classes cover
-spitzer, round-nose, flat-nose, mushroomed, flattened, irregular-fragment, spall-flake, spall-chunk,
-spherical-shot, and flechette states. Mesh scale comes from each component's calculated diameter
-and length. Physical
+The physical path includes dedicated geometry for intact and deformed projectiles and projectile
+fragments. Target-generated spall remains fully simulated but is not drawn as standalone geometry.
+Components embedded in a character, corpse, armor, helmet, or other character-owned equipment also
+remain simulation-only so independent meshes cannot show through a hidden or close-clipped actor
+renderer. Embedded projectiles on world geometry and moving props remain visible. Ten deterministic
+low-poly shape classes remain available to the simulation and renderer. Mesh scale comes from each
+rendered component's calculated diameter and length. Physical
 yaw is applied around a deterministic azimuth, while moving geometry follows the exact pooled EFT
 shot only while its binding identity remains current.
 
@@ -257,7 +259,7 @@ transition telemetry, projectile/spall accounting, energy closure, and observer 
 weapon-independence at a fixed impact
 speed; uncapped factors above one; zero and invalid-input handling; cumulative falloff;
 5.45x39 US; all current local ballistic item templates; and exact acceptance of
-`com.SPT.core` version `4.1.2` while rejecting missing, lower, higher, or four-part versions.
+`com.SPT.core` version `4.1.3` while rejecting missing, lower, higher, or four-part versions.
 
 The game-facing project has compile-only references to BepInEx, Harmony, SPT reflection,
 Assembly-CSharp, UnityEngine.CoreModule, UnityEngine.PhysicsModule, and UnityEngine.

@@ -31,6 +31,8 @@ namespace BallisticPenetration.Runtime
             PhysicalTargetMaterialProfile targetProfile,
             PhysicalFragmentationProfile fragmentationProfile,
             string targetSurfaceIdentity,
+            Collider? hitCollider,
+            bool actorOwnedImpact,
             PhysicalImpactGeometry geometry,
             float parentEftDamage,
             float parentEftPenetrationPower,
@@ -43,6 +45,8 @@ namespace BallisticPenetration.Runtime
             TargetProfile = targetProfile;
             FragmentationProfile = fragmentationProfile;
             TargetSurfaceIdentity = targetSurfaceIdentity ?? string.Empty;
+            HitCollider = hitCollider;
+            ActorOwnedImpact = actorOwnedImpact;
             Geometry = geometry;
             ParentEftDamage = parentEftDamage;
             ParentEftPenetrationPower = parentEftPenetrationPower;
@@ -61,6 +65,10 @@ namespace BallisticPenetration.Runtime
         internal PhysicalFragmentationProfile FragmentationProfile { get; }
 
         internal string TargetSurfaceIdentity { get; }
+
+        internal Collider? HitCollider { get; }
+
+        internal bool ActorOwnedImpact { get; }
 
         internal PhysicalImpactGeometry Geometry { get; }
 
@@ -152,6 +160,13 @@ namespace BallisticPenetration.Runtime
                 collisionState.TransitionId,
                 collisionState.ParentState.CollisionHistory.Count,
                 collisionState.TargetSurfaceIdentity);
+
+            if (collisionState.ActorOwnedImpact && collisionState.SourceBinding != null)
+            {
+                // Keep a stalled or missing outcome callback from leaving the in-flight mesh
+                // inside an actor. TryApplyObservedOutcome restores this binding on fallback.
+                PhysicalProjectileVisualRuntime.Retire(collisionState.SourceBinding);
+            }
 
             // HandleCollision has already applied vanilla degradation. Replace it only after the
             // complete physical collision state is valid, so a failed bridge remains a true no-op.
@@ -249,7 +264,7 @@ namespace BallisticPenetration.Runtime
                         out PhysicalCollisionOutcome outcome,
                         out PhysicalVector3 outgoingDirection))
                 {
-                    return false;
+                    return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                 }
 
                 string collisionId = collisionState.TransitionId;
@@ -273,7 +288,7 @@ namespace BallisticPenetration.Runtime
                         out _)
                     || deformation == null)
                 {
-                    return false;
+                    return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                 }
 
                 PhysicalLossBudget effectiveLossBudget = deformation.LossBudget;
@@ -283,39 +298,42 @@ namespace BallisticPenetration.Runtime
                     PhysicalProjectileState? stoppedState = deformation.PrimaryState;
                     if (stoppedState == null)
                     {
-                        return false;
+                        return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                     }
 
                     if (collisionState.SourceBinding != null)
-                {
-                    PhysicalProjectileLifecycleDiagnostics.RecordCollisionResolved(
-                        shot,
-                        collisionState.SourceBinding,
-                        deformation.CollisionRecord,
-                        collisionState.TransitionId,
-                        false,
-                        false,
-                        collisionState.SourceBinding.TargetWasAlreadyDead,
-                        collisionState.TargetSurfaceIdentity);
+                    {
+                        PhysicalProjectileLifecycleDiagnostics.RecordCollisionResolved(
+                            shot,
+                            collisionState.SourceBinding,
+                            deformation.CollisionRecord,
+                            collisionState.TransitionId,
+                            false,
+                            false,
+                            collisionState.SourceBinding.TargetWasAlreadyDead,
+                            collisionState.TargetSurfaceIdentity);
 
-                    PhysicalProjectileLifecycleDiagnostics.Record(
-                        "retired",
-                        shot,
-                        collisionState.SourceBinding,
-                        "terminal-stop");
+                        PhysicalProjectileLifecycleDiagnostics.Record(
+                            "retired",
+                            shot,
+                            collisionState.SourceBinding,
+                            "terminal-stop");
                         PhysicalShotBindingStore.RemoveIfSame(
                             shot,
                             collisionState.SourceBinding);
                         PhysicalProjectileVisualRuntime.Retire(
                             collisionState.SourceBinding);
-                }
+                    }
 
-                PhysicalProjectileVisualRuntime.RegisterEmbedded(stoppedState);
-                PhysicalProjectileTelemetryRuntime.PublishResolvedStopped(
-                    shot,
-                    collisionState,
-                    stoppedState,
-                    effectiveLossBudget);
+                    PhysicalProjectileVisualRuntime.RegisterEmbedded(
+                        stoppedState,
+                        collisionState.HitCollider,
+                        collisionState.ActorOwnedImpact);
+                    PhysicalProjectileTelemetryRuntime.PublishResolvedStopped(
+                        shot,
+                        collisionState,
+                        stoppedState,
+                        effectiveLossBudget);
                     return true;
                 }
 
@@ -339,7 +357,7 @@ namespace BallisticPenetration.Runtime
                             out _)
                         || fragmentation == null)
                     {
-                        return false;
+                        return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                     }
 
                     if (fragmentation.PrimaryState != null)
@@ -358,7 +376,7 @@ namespace BallisticPenetration.Runtime
                 {
                     if (deformation.PrimaryState == null)
                     {
-                        return false;
+                        return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                     }
 
                     components.Add(deformation.PrimaryState);
@@ -380,7 +398,7 @@ namespace BallisticPenetration.Runtime
                                 out _)
                             || targetSpall == null)
                         {
-                            return false;
+                            return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                         }
 
                         for (int index = 0; index < targetSpall.Components.Count; index++)
@@ -403,7 +421,7 @@ namespace BallisticPenetration.Runtime
                     || replacements == null
                     || replacementBindings == null)
                 {
-                    return false;
+                    return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
                 }
 
                 var originalChildren = new List<Shot>(shot.Fragments);
@@ -456,8 +474,28 @@ namespace BallisticPenetration.Runtime
             catch (Exception exception)
             {
                 Plugin.LogHookFailure("Physical projectile outcome bridge", exception);
-                return false;
+                return RestoreActorOwnedSourceVisualOnFallback(shot, collisionState);
             }
+        }
+
+        private static bool RestoreActorOwnedSourceVisualOnFallback(
+            Shot? shot,
+            PhysicalRuntimeCollisionState? collisionState)
+        {
+            if (shot != null
+                && collisionState?.ActorOwnedImpact == true
+                && collisionState.SourceBinding != null
+                && PhysicalShotBindingStore.TryGet(
+                    shot,
+                    out PhysicalShotBinding? activeBinding)
+                && ReferenceEquals(activeBinding, collisionState.SourceBinding))
+            {
+                PhysicalProjectileVisualRuntime.RegisterLive(
+                    shot,
+                    collisionState.SourceBinding);
+            }
+
+            return false;
         }
 
         private static bool TryCreateCollisionState(
@@ -470,6 +508,9 @@ namespace BallisticPenetration.Runtime
             out PhysicalRuntimeCollisionState? collisionState)
         {
             collisionState = null;
+            // Visual anchoring is observational metadata. A missing collider must never become an
+            // additional collision-state rejection; RegisterEmbedded preserves the world pose.
+            Collider? hitCollider = shot.HitCollider;
             if (!PhysicalRuntimeProfileResolver.TryResolveProjectileProfile(
                     state,
                     out PhysicalProjectileMaterialProfile? projectileProfile)
@@ -498,6 +539,8 @@ namespace BallisticPenetration.Runtime
                 targetProfile,
                 fragmentationProfile,
                 targetSurfaceIdentity,
+                hitCollider,
+                IsActorOwnedImpact(shot, hitCollider),
                 geometry,
                 parentEftDamage,
                 parentEftPenetrationPower,
@@ -899,6 +942,18 @@ namespace BallisticPenetration.Runtime
             }
 
             return collider.GetComponentInParent<EFT.Interactive.Corpse>() != null;
+        }
+
+        private static bool IsActorOwnedImpact(Shot shot, Collider? hitCollider)
+        {
+            if (shot?.HittedBallisticCollider is BodyPartCollider)
+            {
+                return true;
+            }
+
+            return hitCollider != null
+                && (hitCollider.GetComponentInParent<EFT.Player>() != null
+                    || hitCollider.GetComponentInParent<EFT.Interactive.Corpse>() != null);
         }
 
         private static bool TryGetDirection(Vector3 value, out PhysicalVector3 direction)

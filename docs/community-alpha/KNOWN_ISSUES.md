@@ -4,7 +4,7 @@ No reproducible defect is confirmed for `1.3.0-alpha.1` at publication time. New
 
 ## Known limitations
 
-- Only SPT 4.1.2 / EFT 0.16.9.40743 is supported.
+- Only SPT 4.1.3 / EFT 0.16.9.40743 is supported.
 - The physical-projectile runtime is experimental and disabled by default.
 - Unknown ammunition template identities fail open to the host behavior instead of receiving a guessed physical design.
 - The material system uses conservative engineering profiles based on the information exposed by the game. It is not manufacturer test data or certification evidence.

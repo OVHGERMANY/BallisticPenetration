@@ -7,7 +7,7 @@ using UnityEngine;
 namespace BallisticPenetration.Runtime
 {
     /// <summary>
-    /// Resolves only the SPT 4.1.2 game methods this plugin supports. Keeping
+    /// Resolves only the SPT 4.1.3 game methods this plugin supports. Keeping
     /// signature verification separate from Harmony patch construction means an
     /// incompatible client fails during plugin startup instead of patching an
     /// unintended overload.
@@ -107,7 +107,7 @@ namespace BallisticPenetration.Runtime
                 || method.IsStatic
                 || method.ReturnType != expectedReturnType)
             {
-                throw new MissingMethodException("SPT 4.1.2 target was not found with the required signature: " + displayName);
+                throw new MissingMethodException("SPT 4.1.3 target was not found with the required signature: " + displayName);
             }
 
             ParameterInfo[] parameters = method.GetParameters();

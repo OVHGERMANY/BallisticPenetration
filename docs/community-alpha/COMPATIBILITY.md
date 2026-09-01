@@ -2,7 +2,7 @@
 
 ## Supported environment
 
-- SPT 4.1.2 exactly.
+- SPT 4.1.3 exactly.
 - EFT 0.16.9.40743.
 - Windows and `EscapeFromTarkov.exe`.
 - BepInEx and the SPT runtime bundled with that SPT release.

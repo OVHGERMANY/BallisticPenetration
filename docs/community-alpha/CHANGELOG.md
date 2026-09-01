@@ -2,7 +2,7 @@
 
 ## 1.3.0-alpha.1
 
-- Added an exact physical-design catalog for all 208 positive-speed ammunition templates in SPT 4.1.2.
+- Added an exact physical-design catalog for all 208 positive-speed ammunition templates in SPT 4.1.3.
 - Classified 185 kinetic projectile templates and 23 payload templates, with zero unresolved positive-speed templates.
 - Added construction, terminal-design, and initial-shape profiles for conventional bullets, penetrators, slugs, buckshot, flechettes, and game-defined fragments.
 - Added per-projectile handling for multi-projectile shot and flechette loads.

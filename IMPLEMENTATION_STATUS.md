@@ -1,12 +1,12 @@
 # BallisticPenetration implementation status
 
-Snapshot date: 2026-08-15
+Snapshot date: 2026-09-01
 
-## Community alpha candidate
+## GitHub Test 2 prerelease candidate
 
 - Plugin version: `1.3.0`
-- Planned prerelease tag: `v1.3.0-alpha.1`
-- Supported environment: SPT `4.1.2`, EFT `0.16.9.40743`
+- Planned prerelease tag: `v1.3.0-field-report-test.2`
+- Supported environment: SPT `4.1.3`, EFT `0.16.9.40743`
 - Release target: `netstandard2.1`
 - Physical projectile state schema: `2`
 - Physical transition publisher schema: `2`
@@ -20,7 +20,7 @@ death, armor-penetration, or ricochet decisions.
 
 ## Complete ammunition catalog
 
-The exact SPT 4.1.2 catalog resolves all `208` positive-speed ammunition templates:
+The exact SPT 4.1.3 catalog resolves all `208` positive-speed ammunition templates:
 
 - `185` kinetic projectile templates enter the physical-projectile path when it is enabled.
 - `23` payload templates are explicitly classified and fail open to EFT's existing handling.

@@ -126,6 +126,10 @@ namespace BallisticPenetration.Validation
             Run("Physical projectile state and derived SI values", ValidatePhysicalProjectileState);
             Run("Physical projectile invalid-state fallback", ValidatePhysicalProjectileInvalidFallback);
             Run("Physical component render geometry", ValidatePhysicalVisualGeometry);
+            Run("Physical component visual eligibility", ValidatePhysicalVisualEligibility);
+            Run(
+                "Embedded physical visual anchor orientation",
+                ValidatePhysicalVisualAnchorOrientation);
             Run("Physical renderer ownership and culling policy", ValidatePhysicalVisualLifecycle);
             Run("Physical renderer FIFO command budgeting", ValidatePhysicalVisualCommandBudget);
             Run("Physical renderer deterministic capacity stress", ValidatePhysicalVisualCapacityStress);
@@ -252,11 +256,11 @@ namespace BallisticPenetration.Validation
         {
             AssertEqual(
                 "supported SPT core version text",
-                "4.1.2",
+                "4.1.3",
                 SptVersionCompatibility.SupportedCoreVersionText);
             AssertTrue(
-                "exact 4.1.2 accepted",
-                SptVersionCompatibility.IsExactSupportedCoreVersion(new Version(4, 1, 2)));
+                "exact 4.1.3 accepted",
+                SptVersionCompatibility.IsExactSupportedCoreVersion(new Version(4, 1, 3)));
             AssertTrue(
                 "missing version rejected",
                 !SptVersionCompatibility.IsExactSupportedCoreVersion(null));
@@ -264,10 +268,11 @@ namespace BallisticPenetration.Validation
             Version[] unsupportedVersions =
             {
                 new Version(4, 1, 1),
-                new Version(4, 1, 3),
+                new Version(4, 1, 2),
+                new Version(4, 1, 4),
                 new Version(4, 2, 0),
                 new Version(5, 0, 0),
-                new Version(4, 1, 2, 0)
+                new Version(4, 1, 3, 0)
             };
 
             foreach (Version unsupportedVersion in unsupportedVersions)
@@ -2327,6 +2332,60 @@ namespace BallisticPenetration.Validation
                 invalidScaleReason);
         }
 
+        private static void ValidatePhysicalVisualEligibility()
+        {
+            PhysicalProjectileState projectile = CreatePhysicalStateOrThrow(
+                CreateValidRootInput(800d, 0.01d, 0.0095d));
+            AssertTrue(
+                "projectile renders in flight",
+                PhysicalComponentVisualEligibility.ShouldRender(
+                    projectile,
+                    PhysicalComponentVisualContext.InFlight));
+            AssertTrue(
+                "projectile embeds on world surface",
+                PhysicalComponentVisualEligibility.ShouldRender(
+                    projectile,
+                    PhysicalComponentVisualContext.EmbeddedWorldSurface));
+            AssertTrue(
+                "projectile hidden on character surface",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    projectile,
+                    PhysicalComponentVisualContext.EmbeddedCharacterSurface));
+
+            PhysicalProjectileState spall = CreateChildState(
+                projectile,
+                PhysicalProjectileKind.TargetSpall,
+                "visual-eligibility-spall",
+                0,
+                0.001d,
+                300d);
+            AssertTrue(
+                "target spall hidden in flight",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    spall,
+                    PhysicalComponentVisualContext.InFlight));
+            AssertTrue(
+                "target spall hidden on world surface",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    spall,
+                    PhysicalComponentVisualContext.EmbeddedWorldSurface));
+            AssertTrue(
+                "missing component hidden",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    null,
+                    PhysicalComponentVisualContext.InFlight));
+            AssertTrue(
+                "unknown context hidden",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    projectile,
+                    PhysicalComponentVisualContext.Unknown));
+            AssertTrue(
+                "out-of-range context hidden",
+                !PhysicalComponentVisualEligibility.ShouldRender(
+                    projectile,
+                    (PhysicalComponentVisualContext)int.MaxValue));
+        }
+
         private static void ValidatePhysicalVisualLifecycle()
         {
             AssertTrue(
@@ -2426,6 +2485,81 @@ namespace BallisticPenetration.Validation
                 "expanded visual capacity reuses a valid low slot",
                 limitedLedger.TryAcquire(503L, 3, out PhysicalVisualLease expanded));
             AssertTrue("expanded visual slot stays below limit", expanded.Slot < 3);
+        }
+
+        private static void ValidatePhysicalVisualAnchorOrientation()
+        {
+            double halfAnchorAngle = Math.PI / 4d;
+            var anchorWorld = new PhysicalOrientation(
+                0d,
+                Math.Sin(halfAnchorAngle),
+                0d,
+                Math.Cos(halfAnchorAngle));
+            double halfLocalAngle = Math.PI / 12d;
+            var expectedLocal = new PhysicalOrientation(
+                Math.Sin(halfLocalAngle),
+                0d,
+                0d,
+                Math.Cos(halfLocalAngle));
+
+            AssertTrue(
+                "anchored visual world orientation resolves",
+                PhysicalVisualAnchorGeometry.TryResolveWorldOrientation(
+                    anchorWorld,
+                    expectedLocal,
+                    out PhysicalOrientation initialWorld));
+            double expectedSmallComponent = (Math.Sqrt(3d) - 1d) / 4d;
+            double expectedLargeComponent = (Math.Sqrt(3d) + 1d) / 4d;
+            var expectedInitialWorld = new PhysicalOrientation(
+                expectedSmallComponent,
+                expectedLargeComponent,
+                -expectedSmallComponent,
+                expectedLargeComponent);
+            AssertTrue(
+                "anchored visual composes anchor before local orientation",
+                Math.Abs(OrientationDot(expectedInitialWorld, initialWorld))
+                    >= 0.999999999999d);
+            AssertTrue(
+                "anchored visual local orientation is recovered",
+                PhysicalVisualAnchorGeometry.TryCreateLocalOrientation(
+                    anchorWorld,
+                    initialWorld,
+                    out PhysicalOrientation recoveredLocal));
+            AssertTrue(
+                "anchored visual local orientation round-trips",
+                Math.Abs(OrientationDot(expectedLocal, recoveredLocal)) >= 0.999999999999d);
+
+            var movedAnchor = new PhysicalOrientation(0d, 1d, 0d, 0d);
+            AssertTrue(
+                "anchored visual follows a rotated surface",
+                PhysicalVisualAnchorGeometry.TryResolveWorldOrientation(
+                    movedAnchor,
+                    recoveredLocal,
+                    out PhysicalOrientation movedWorld));
+            AssertTrue("moved anchored visual orientation remains unit", movedWorld.IsUnit);
+            AssertTrue(
+                "moved anchored visual orientation changes with surface",
+                Math.Abs(OrientationDot(initialWorld, movedWorld)) < 0.999999d);
+            AssertTrue(
+                "moved anchored visual local orientation remains stable",
+                PhysicalVisualAnchorGeometry.TryCreateLocalOrientation(
+                    movedAnchor,
+                    movedWorld,
+                    out PhysicalOrientation movedLocal)
+                && Math.Abs(OrientationDot(expectedLocal, movedLocal)) >= 0.999999999999d);
+
+            AssertTrue(
+                "nonunit anchor orientation is rejected",
+                !PhysicalVisualAnchorGeometry.TryResolveWorldOrientation(
+                    new PhysicalOrientation(1d, 1d, 1d, 1d),
+                    expectedLocal,
+                    out _));
+            AssertTrue(
+                "nonfinite visual orientation is rejected",
+                !PhysicalVisualAnchorGeometry.TryCreateLocalOrientation(
+                    anchorWorld,
+                    new PhysicalOrientation(double.NaN, 0d, 0d, 1d),
+                    out _));
         }
 
         private static void ValidatePhysicalVisualCommandBudget()
@@ -6051,6 +6185,16 @@ namespace BallisticPenetration.Validation
                 2d * ((orientation.X * orientation.Z) + (orientation.W * orientation.Y)),
                 2d * ((orientation.Y * orientation.Z) - (orientation.W * orientation.X)),
                 1d - (2d * ((orientation.X * orientation.X) + (orientation.Y * orientation.Y))));
+        }
+
+        private static double OrientationDot(
+            PhysicalOrientation left,
+            PhysicalOrientation right)
+        {
+            return (left.X * right.X)
+                + (left.Y * right.Y)
+                + (left.Z * right.Z)
+                + (left.W * right.W);
         }
 
         private static PhysicalDeformationInput CreateValidDeformationInput(
