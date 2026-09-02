@@ -2,11 +2,10 @@
 
 Standalone SPT 4.1.3 client plugin for uncapped, impact-speed-based terminal ballistics.
 
-Version `1.3.0` targets SPT `4.1.3` exactly. Installation, privacy, rollback,
-compatibility, changelog, and known-issue guidance is under
-[`docs/community-alpha`](docs/community-alpha/INSTALLATION.md). Offline build and
-validation are complete; the exact release artifact has not completed in-game runtime
-acceptance. The experimental physical-projectile path remains disabled by default.
+Version `1.3.0` targets SPT `4.1.3` exactly. Download the normal ZIP from the
+[`v1.3.0` release](https://github.com/OVHGERMANY/BallisticPenetration/releases/tag/v1.3.0),
+close SPT, and extract it directly into the SPT folder. The optional physical-projectile
+path remains disabled by default.
 
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
 and requires its version to equal `4.1.3` exactly before resolving targets or enabling
@@ -187,10 +186,7 @@ retained. With no subscriber, the collision path
 returns before constructing a telemetry snapshot; subscriber exceptions are isolated from the
 simulation and from other subscribers.
 
-This runtime path has passed offline compiler, analyzer, invariant, conservation, deterministic,
-renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. The
-exact `1.3.0` release artifact has not completed in-game runtime acceptance, and this path remains
-experimental. Only the exact
+The physical-projectile path is optional and disabled by default. Only the exact
 ballistic collider reported by EFT participates. A loose inventory item's visible mesh may lack an
 active ballistic collider; in that case the shot and physical model continue to the world surface
 behind it, and a decal overlapping the loose mesh is not evidence that the item absorbed the hit.
