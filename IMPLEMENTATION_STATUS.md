@@ -2,10 +2,10 @@
 
 Snapshot date: 2026-09-01
 
-## GitHub Test 2 prerelease candidate
+## SPT 4.1.3 release candidate
 
 - Plugin version: `1.3.0`
-- Planned prerelease tag: `v1.3.0-field-report-test.2`
+- Planned release tag: `v1.3.0`
 - Supported environment: SPT `4.1.3`, EFT `0.16.9.40743`
 - Release target: `netstandard2.1`
 - Physical projectile state schema: `2`
@@ -81,7 +81,7 @@ skipped.
 - Physical state, projection, host-seed bounds, telemetry isolation, conservation, provenance,
   fail-open, and cumulative-flight checks pass.
 
-## Known alpha limitations
+## Known limitations
 
 - The physical path is experimental and remains disabled by default.
 - Construction and target-material properties are engineering approximations from the installed
@@ -92,12 +92,12 @@ skipped.
 - Low-poly component geometry is a physical-state visualization, not a scanned projectile model.
 - Some installed multi-projectile source values are game abstractions and are preserved per EFT
   child unless an explicit catalog fallback is required.
-- The `1.3.0` candidate still requires the final minimal startup/load smoke test and broader
+- The exact `1.3.0` release artifact still requires a startup/load smoke test and broader
   community runtime testing for compatibility, balance, rendering, pooling, and performance.
 
 ## Release boundary
 
-No further feature category is required before the community alpha. Changes after publication are
+No further feature category is required before the `1.3.0` release. Changes after publication are
 limited to defects reproduced by local or community testing, with crashes, corrupt state,
 classification errors, conservation failures, provenance failures, pooled-identity leaks, severe
 performance regressions, and broken installation or rollback taking priority.

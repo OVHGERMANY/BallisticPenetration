@@ -2,9 +2,11 @@
 
 Standalone SPT 4.1.3 client plugin for uncapped, impact-speed-based terminal ballistics.
 
-The current development build is a public experimental alpha. Installation, testing,
-privacy, rollback, compatibility, and confirmed-issue guidance is under
-[`docs/community-alpha`](docs/community-alpha/TESTING_GUIDE.md).
+Version `1.3.0` targets SPT `4.1.3` exactly. Installation, privacy, rollback,
+compatibility, changelog, and known-issue guidance is under
+[`docs/community-alpha`](docs/community-alpha/INSTALLATION.md). Offline build and
+validation are complete; the exact release artifact has not completed in-game runtime
+acceptance. The experimental physical-projectile path remains disabled by default.
 
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
 and requires its version to equal `4.1.3` exactly before resolving targets or enabling
@@ -84,9 +86,9 @@ Armor block and penetration outcomes can change because the existing armor calcu
 reads the corrected `PenetrationPower`. That is the intended gameplay effect. The
 separate armor-CF child-shot degradation remains unpatched.
 
-## Physical projectile development
+## Physical projectiles
 
-The development tree now contains a dependency-free, versioned physical-state core for
+The plugin contains a dependency-free, versioned physical-state core for
 intact projectiles, deformed projectiles, projectile fragments, and target-generated
 spall. It records component-specific SI values for mass, geometry, projected area, drag,
 position, velocity, momentum, kinetic energy, orientation, yaw, terminal state, lineage,
@@ -100,7 +102,7 @@ budget, mixed parent/root/collision lineage, duplicate component identities, non
 state, and fragmentation events with no physical parent fragment. A fixed PCG random
 stream drives deterministic deformation, fragmentation, spall, and child-shot seed allocation.
 
-The development tree also contains a deterministic deformation and material-response
+The plugin also contains a deterministic deformation and material-response
 solver. It accepts construction-specific projectile properties, target resistance
 properties, measured physical thickness, and actual material path length. For an outcome
 already selected by the host ballistics system, it calculates target-resistance work,
@@ -121,7 +123,7 @@ count remains observable and produces the minimum one physical projectile compon
 close a nonzero fragmentation reservation. On hard materials, a confirmed penetration or
 deviation can also eject target spall when the projectile itself did not fragment.
 
-The development tree also contains the checked boundary for individual flight. A pure projector
+The plugin also contains the checked boundary for individual flight. A pure projector
 converts each physical component into EFT mass, equivalent diameter, velocity, relative G1 drag,
 damage, and penetration while preserving an explicitly supplied EFT target/armor transfer
 multiplier. A separate flight reconciler accepts EFT's measured position and velocity at the next
@@ -186,8 +188,9 @@ returns before constructing a telemetry snapshot; subscriber exceptions are isol
 simulation and from other subscribers.
 
 This runtime path has passed offline compiler, analyzer, invariant, conservation, deterministic,
-renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. It has
-entered the final integrated in-game acceptance campaign and remains experimental. Only the exact
+renderer-isolation, ownership-generation, mesh-geometry, and full ammunition-database tests. The
+exact `1.3.0` release artifact has not completed in-game runtime acceptance, and this path remains
+experimental. Only the exact
 ballistic collider reported by EFT participates. A loose inventory item's visible mesh may lack an
 active ballistic collider; in that case the shot and physical model continue to the world surface
 behind it, and a decal overlapping the loose mesh is not evidence that the item absorbed the hit.
@@ -223,6 +226,12 @@ Available settings:
 - `Diagnostics / Trace Lifetime Seconds` (default `2`)
 - `Diagnostics / Maximum Trace Segment Meters` (default `30`)
 - `Diagnostics / Impact Marker Size Meters` (default `0.15`)
+- `Field Reports / Enable Field Bug Reports` (default `true`)
+- `Field Reports / Field Report Issue Marker Key` (default `F8`)
+- `Field Reports / Field Report Flush Interval Seconds` (default `1`)
+- `Field Reports / Field Report Maximum Completed Files` (default `20`)
+- `Field Reports / Field Report Maximum Folder MiB` (default `512`)
+- `Field Reports / Field Report Maximum File MiB` (default `256`)
 
 The live overlay shows the values at three points in this plugin:
 
@@ -234,6 +243,11 @@ The live overlay shows the values at three points in this plugin:
 For a skipped hit, the overlay says `BP OUTPUT NOT WRITTEN` and gives the reason. Another
 Harmony patch can still change the values after this plugin runs. Live diagnostics are
 disabled by default.
+
+Field reports are local append-only `.bpreport` files under
+`BepInEx\FieldReports\BallisticPenetration`. They are enabled by default, retained within
+the configured file-count and size limits, and never uploaded by the plugin. Set
+`Field Reports / Enable Field Bug Reports` to `false` to disable their creation.
 
 ## Build and validate
 

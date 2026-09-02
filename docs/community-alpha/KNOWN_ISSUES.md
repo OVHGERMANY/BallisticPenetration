@@ -1,6 +1,6 @@
 # Known Issues and Limitations
 
-No reproducible defect is confirmed for `1.3.0-alpha.1` at publication time. New reports remain unconfirmed until they can be reproduced or supported by sufficient evidence.
+No defect is confirmed by the completed offline validation for `1.3.0`. The exact release artifact has not completed in-game runtime acceptance, so this is not evidence that live gameplay is defect-free. New reports remain unconfirmed until they can be reproduced or supported by sufficient evidence.
 
 ## Known limitations
 
@@ -15,4 +15,4 @@ No reproducible defect is confirmed for `1.3.0-alpha.1` at publication time. New
 
 | Short title | Affected version | Ammunition or system | Severity | Reproduction status | Workaround | Fix status | Issue |
 |---|---|---|---|---|---|---|---|
-| None currently confirmed | 1.3.0-alpha.1 | — | — | — | — | Open for community evidence | — |
+| None currently confirmed | 1.3.0 | — | — | — | — | Open for community evidence | — |
