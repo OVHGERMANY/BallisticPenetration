@@ -256,11 +256,11 @@ namespace BallisticPenetration.Validation
         {
             AssertEqual(
                 "supported SPT core version text",
-                "4.1.3",
+                "4.1.4",
                 SptVersionCompatibility.SupportedCoreVersionText);
             AssertTrue(
-                "exact 4.1.3 accepted",
-                SptVersionCompatibility.IsExactSupportedCoreVersion(new Version(4, 1, 3)));
+                "exact 4.1.4 accepted",
+                SptVersionCompatibility.IsExactSupportedCoreVersion(new Version(4, 1, 4)));
             AssertTrue(
                 "missing version rejected",
                 !SptVersionCompatibility.IsExactSupportedCoreVersion(null));
@@ -269,10 +269,11 @@ namespace BallisticPenetration.Validation
             {
                 new Version(4, 1, 1),
                 new Version(4, 1, 2),
-                new Version(4, 1, 4),
+                new Version(4, 1, 3),
+                new Version(4, 1, 5),
                 new Version(4, 2, 0),
                 new Version(5, 0, 0),
-                new Version(4, 1, 3, 0)
+                new Version(4, 1, 4, 0)
             };
 
             foreach (Version unsupportedVersion in unsupportedVersions)

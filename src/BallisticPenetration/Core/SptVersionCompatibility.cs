@@ -12,7 +12,7 @@ namespace BallisticPenetration.Core
     internal static class SptVersionCompatibility
     {
         internal const string CorePluginGuid = "com.SPT.core";
-        internal const string SupportedCoreVersionText = "4.1.3";
+        internal const string SupportedCoreVersionText = "4.1.4";
 
         private static readonly Version SupportedCoreVersion =
             new Version(SupportedCoreVersionText);

@@ -31,7 +31,7 @@ namespace BallisticPenetration
     {
         internal const string PluginGuid = "com.janky.ballisticpenetration";
         internal const string PluginName = "Janky-BallisticPenetration";
-        internal const string PluginVersion = "1.3.0";
+        internal const string PluginVersion = "1.3.1";
 
         private CollisionSnapshotPatch? _collisionSnapshotPatch;
         private FragmentFalloffPatch? _fragmentFalloffPatch;
@@ -92,7 +92,9 @@ namespace BallisticPenetration
                     armorPlateColliderPostmortemArmorPatch.HarmonyId);
 
                 EnablePatchesTransactionally();
-                Logger.LogInfo(PluginName + " loaded for SPT 4.1.3.");
+                Logger.LogInfo(PluginName + " " + BuildVersion + " loaded for SPT "
+                    + SptVersionCompatibility.SupportedCoreVersionText
+                    + ". Compatibility update; gameplay behavior unchanged.");
             }
             catch (Exception exception)
             {
@@ -504,5 +506,7 @@ namespace BallisticPenetration
                     + ". " + PluginName + " will continue with Priority.Last prefixes.");
             }
         }
+
+        internal const string BuildVersion = "1.3.1";
     }
 }
