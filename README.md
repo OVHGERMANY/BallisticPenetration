@@ -1,15 +1,17 @@
 # Janky-BallisticPenetration
 
-Standalone SPT 4.1.3 client plugin for uncapped, impact-speed-based terminal ballistics.
+Standalone client plugin for uncapped, impact-speed-based terminal ballistics.
 
-Version `1.3.0` targets SPT `4.1.3` exactly. Installation, privacy, rollback,
+Version `1.3.1` targets official SPT `4.1.4` and EFT `0.16.9.5.40743`, based on published `v1.3.0`. It changes compatibility and build identity only. See [release notes](docs/SPT-4.1.4-release.md) and [compatibility evidence](docs/exec-plans/active/spt-4.1.4-compatibility.md). Install `BallisticPenetration-1.3.1-SPT-4.1.4.zip` into the SPT root with Tarkov closed; existing configuration is preserved.
+
+Published version `1.3.0` still targets SPT `4.1.3` exactly. Historical installation, privacy, rollback,
 compatibility, changelog, and known-issue guidance is under
 [`docs/community-alpha`](docs/community-alpha/INSTALLATION.md). Offline build and
 validation are complete; the exact release artifact has not completed in-game runtime
 acceptance. The experimental physical-projectile path remains disabled by default.
 
 At startup, the plugin reads the already-loaded `com.SPT.core` metadata from BepInEx
-and requires its version to equal `4.1.3` exactly before resolving targets or enabling
+and requires its version to equal `4.1.4` exactly before resolving targets or enabling
 any of its four Harmony patches. The hard `BepInDependency` remains for load ordering
 and minimum dependency handling, but it does not replace the equality check. A missing
 version or any other version is logged and initialization fails closed.

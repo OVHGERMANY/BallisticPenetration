@@ -1,5 +1,28 @@
 # PROJECT_STATE
 
+## Final SPT 4.1.4 compatibility release - 2026-09-05
+
+- The user closed further gameplay rounds and requested finalization. Current version is `1.3.1`; the preview checkpoints below are historical. The separate development worktree remains excluded.
+- Final Release build: 0 warnings/errors; installed-catalog validation: 68 passed, 0 failed. The final two-companion audit passes all 11 game contracts and finds no unexpected method changes or unresolved runtime references.
+- Source and installed DLL SHA-256: `FFE84A4DB4E85CA6C90C150335502559D828C1152A67CFD3EB655BC4F11B38B2`, 310,784 bytes. Installed with Tarkov closed at 2026-09-05 13:08 local. All 9 saved configuration files and both HollywoodFX files remained unchanged.
+- Rollback: `E:\Games\SPT-Mod-Backups\20260905-130800-client-compatibility-final`. The previous preview DLL and configuration copies are retained with the deployment manifest.
+- Reproduced package SHA-256: `E33A3E69C4572F09E418AB20016302D5D5B02D067EB98B79F820EA73FB2DC273`, 123,811 bytes. Package: `BallisticPenetration-1.3.1-SPT-4.1.4.zip`.
+- Combined preview startup and first-raid use were observed; comprehensive physics/multilayer/actor acceptance was not performed. Final release identity differs from the tested preview; no gameplay implementation changed during finalization. See [release notes](SPT-4.1.4-release.md).
+- Publication targets the dedicated `spt-4.1.4` branch and `v1.3.1` tag. The old `spt-4.1.3` branch and prior releases remain intact.
+
+## Historical compatibility preview - 2026-09-05
+
+- This worktree is `codex/spt-4.1.4-compatibility`, based on the published `v1.3.0` commit `9d851a07ed0c3447a1e95a78188360015b62bbbc`.
+- Current task: a local `1.3.1-preview.1` port to official SPT `4.1.4`, EFT `0.16.9.5.40743`, so the user can resume the HollywoodFX acceptance test with both companion mods loaded.
+- Active plan: [SPT 4.1.4 compatibility](exec-plans/active/spt-4.1.4-compatibility.md).
+- The original development worktree and its unpublished physical-projectile edits are out of scope and untouched. No gameplay algorithm, configuration default, report schema or rendering policy is changed here.
+- Baseline and final candidate against installed 4.1.4 references: Release builds have 0 warnings/errors; each validation run has 68 passes and 0 failures.
+- Static audit: 1,534 method bodies compared with published v1.3.0; only four compatibility/identity string changes. All 226 referenced runtime members resolve against installed dependencies. The combined companion audit verified 11 game-method contracts with unchanged normalized IL from backed-up 4.1.3.
+- Installed at `2026-09-05T11:30:06-05:00`, client closed. Candidate/installed length: 311,296 bytes; SHA-256 `CFCFF0A998BA4A0AA66545F6353D7AC5307CB0DC0916207192582405D9B98AFF`. Companion deployment preserved all 22 protected config and unrelated DLL files.
+- Rollback: `E:\Games\SPT-Mod-Backups\20260905-112852-spt414-client-compatibility\before\BallisticPenetration.dll`, SHA-256 `8F02732942575F8460E3D434C623170B86D87F77D04E739ED0840CF4A4A68C56`.
+- Fresh client PID 2816 started at 11:30:56 -05:00. Its log verifies exact core 4.1.4 at line 50, all four patches enabled at lines 51-54, and 1.3.1-preview.1 loaded at line 55. Combined startup with BL/HFX passed with zero client error lines at 11:32:49. Raid/physics acceptance remains pending; startup is not gameplay validation.
+- The sections below are historical development context, not the current branch identity or evidence that the compatibility preview has passed in-game acceptance.
+
 ## Repository
 - BallisticPenetration: `C:\Users\jbnel\Projects\BallisticPenetration`
 - Purpose: Ballistic terminal modifier and diagnostics pipeline for BallisticsLab-enabled physical projectile flow.
