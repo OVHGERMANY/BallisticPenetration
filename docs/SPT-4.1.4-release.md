@@ -1,5 +1,7 @@
 # BallisticPenetration 1.3.1 — SPT 4.1.4 compatibility
 
+Release DLLs omit commit-specific debug provenance so an unchanged implementation rebuilds identically after Git merges. This packaging correction changes no gameplay method.
+
 For official SPT 4.1.4 / EFT 0.16.9.5.40743 only. SPT 4.1.3, 4.1.5 and other versions remain rejected by the exact-version guard.
 
 This release ports the published 1.3.0 baseline. Compatibility and release identity change; trajectory, velocity, penetration, damage, fragmentation, collision handling, defaults and report schemas do not. Separate unpublished development work is not included. Existing known issues are not represented as fixed by this version update.

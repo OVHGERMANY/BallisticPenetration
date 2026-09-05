@@ -4,9 +4,10 @@
 
 - The user closed further gameplay rounds and requested finalization. Current version is `1.3.1`; the preview checkpoints below are historical. The separate development worktree remains excluded.
 - Final Release build: 0 warnings/errors; installed-catalog validation: 68 passed, 0 failed. The final two-companion audit passes all 11 game contracts and finds no unexpected method changes or unresolved runtime references.
-- Source and installed DLL SHA-256: `FFE84A4DB4E85CA6C90C150335502559D828C1152A67CFD3EB655BC4F11B38B2`, 310,784 bytes. Installed with Tarkov closed at 2026-09-05 13:08 local. All 9 saved configuration files and both HollywoodFX files remained unchanged.
-- Rollback: `E:\Games\SPT-Mod-Backups\20260905-130800-client-compatibility-final`. The previous preview DLL and configuration copies are retained with the deployment manifest.
-- Reproduced package SHA-256: `E33A3E69C4572F09E418AB20016302D5D5B02D067EB98B79F820EA73FB2DC273`, 123,811 bytes. Package: `BallisticPenetration-1.3.1-SPT-4.1.4.zip`.
+- Source and installed DLL SHA-256: `801105EF949D2320E5B538136986DDC158D7AFA27F6E7F73B8C3645F0B52BA8A`, 310,784 bytes. Installed with Tarkov closed at 2026-09-05 13:11 local. All 9 saved configuration files and both HollywoodFX files remained unchanged.
+- Rollback: `E:\Games\SPT-Mod-Backups\20260905-131138-client-compatibility-final`. The previous final-label DLL/configuration copies are retained; the earlier `20260905-130800-client-compatibility-final` backup retains the preview.
+- Reproduced package SHA-256: `32C2B55680672EFBC3C1E2B85AA37794A120433F032D12A496FDA6794CEF7340`, 123,641 bytes. Package: `BallisticPenetration-1.3.1-SPT-4.1.4.zip`.
+- A clean post-merge rebuild exposed commit-specific SourceLink/PDB metadata changing the DLL hash. Publication stopped before tags/uploads. Release now uses `DebugType=none`; a fresh commit/rebuild preserved the exact DLL hash, and the 11-contract compiled audit again reported zero failures. No gameplay method changed.
 - Combined preview startup and first-raid use were observed; comprehensive physics/multilayer/actor acceptance was not performed. Final release identity differs from the tested preview; no gameplay implementation changed during finalization. See [release notes](SPT-4.1.4-release.md).
 - Publication targets the dedicated `spt-4.1.4` branch and `v1.3.1` tag. The old `spt-4.1.3` branch and prior releases remain intact.
 
